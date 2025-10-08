@@ -5,7 +5,7 @@ const mentorApplicationSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     required: true,
-
+    unique: true // Ensure only one application per user
   },
   name: { type: String, trim: true, default: '' },
   phoneNumber: { type: String, trim: true, default: '' },
