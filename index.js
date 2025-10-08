@@ -27,7 +27,7 @@ app.use(cookieParser())
 // CORS for frontend dev server (send cookies)
 app.use(
   cors({
-    origin: ['http://localhost:5173'],
+    origin: ['http://localhost:5173', 'https://major-project-frontend-y7th.vercel.app'],
     credentials: true
   })
 )
