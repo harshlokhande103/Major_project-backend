@@ -151,6 +151,10 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage })
 
+app.get('/', (req, res) => {
+  res.send('Welcome to the Backend API!')
+})
+
 // API Routes
 app.post('/api/users/:id/avatar', upload.single('avatar'), async (req, res) => {
   try {
