@@ -135,7 +135,7 @@ app.post('/api/register', authLimiter, async (req, res) => {
 })
 
 // File upload configuration
-const uploadsDir = path.resolve('uploads')
+const uploadsDir = process.env.NODE_ENV === 'production' ? '/tmp/uploads' : path.resolve('uploads')
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true })
 }
