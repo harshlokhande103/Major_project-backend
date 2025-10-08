@@ -310,13 +310,15 @@ app.post('/api/mentor-applications', requireAuth, async (req, res) => {
     const userId = req.session.user.id;
     const { name, phoneNumber, bio, domain, linkedin, portfolio } = req.body;
 
-    const update = { name, phoneNumber, bio, domain, linkedin, portfolio };
-
-    const application = await MentorApplication.findOneAndUpdate(
-      { userId },
-      { $set: update, $setOnInsert: { userId } },
-      { upsert: true, new: true }
-    );
+    const application = await MentorApplication.create({
+      userId,
+      name,
+      phoneNumber,
+      bio,
+      domain,
+      linkedin,
+      portfolio
+    });
 
     return res.status(200).json(application);
   } catch (error) {
