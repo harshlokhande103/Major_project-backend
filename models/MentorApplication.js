@@ -5,8 +5,14 @@ const mentorApplicationSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     required: true,
-    unique: true // एक यूजर केवल एक मेंटर एप्लीकेशन सबमिट कर सकता है
+    unique: true
   },
+  name: { type: String, trim: true, default: '' },
+  phoneNumber: { type: String, trim: true, default: '' },
+  bio: { type: String, trim: true, default: '' },
+  domain: { type: String, trim: true, default: '' },
+  linkedin: { type: String, trim: true, default: '' },
+  portfolio: { type: String, trim: true, default: '' },
   status: {
     type: String,
     enum: ['pending', 'approved', 'rejected'],
@@ -15,12 +21,7 @@ const mentorApplicationSchema = new mongoose.Schema({
   applicationDate: {
     type: Date,
     default: Date.now
-  },
-  // यहाँ मेंटर के बारे में अन्य विवरण जोड़े जा सकते हैं, जैसे अनुभव, कौशल, आदि।
-  // उदाहरण के लिए:
-  // experience: { type: String },
-  // skills: [{ type: String }],
-  // bio: { type: String },
+  }
 });
 
 const MentorApplication = mongoose.model('MentorApplication', mentorApplicationSchema);

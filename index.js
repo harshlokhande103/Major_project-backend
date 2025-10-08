@@ -24,7 +24,13 @@ const app = express()
 app.use(helmet())
 app.use(express.json())
 app.use(cookieParser())
-app.use(cors())
+// CORS for frontend dev server (send cookies)
+app.use(
+  cors({
+    origin: ['http://localhost:5173'],
+    credentials: true
+  })
+)
 
 // Session configuration
 const SESSION_SECRET = process.env.SESSION_SECRET || 'dev_insecure_secret_change_me'
@@ -245,7 +251,7 @@ app.put('/api/profile', requireAuth, async (req, res) => {
 // Admin - Get all mentor applications
 app.get('/admin/mentor-applications', requireAuth, isAdmin, async (req, res) => {
   try {
-    const applications = await MentorApplication.find({}).populate('mentor', 'firstName lastName email');
+    const applications = await MentorApplication.find({}).populate('userId', 'firstName lastName email');
     res.status(200).json(applications);
   } catch (error) {
     console.error('Error fetching mentor applications:', error);
@@ -275,13 +281,34 @@ app.put('/admin/mentor-applications/:id/status', requireAuth, isAdmin, async (re
 
     // If approved, update user role to mentor
     if (status === 'approved') {
-      await User.findByIdAndUpdate(application.mentor, { role: 'mentor' });
+      await User.findByIdAndUpdate(application.userId, { role: 'mentor' });
     }
 
     res.status(200).json(application);
   } catch (error) {
     console.error('Error updating mentor application status:', error);
     res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Mentor - Create or update an application
+app.post('/api/mentor-applications', requireAuth, async (req, res) => {
+  try {
+    const userId = req.session.user.id;
+    const { name, phoneNumber, bio, domain, linkedin, portfolio } = req.body;
+
+    const update = { name, phoneNumber, bio, domain, linkedin, portfolio };
+
+    const application = await MentorApplication.findOneAndUpdate(
+      { userId },
+      { $set: update, $setOnInsert: { userId } },
+      { upsert: true, new: true }
+    );
+
+    return res.status(200).json(application);
+  } catch (error) {
+    console.error('Error creating mentor application:', error);
+    return res.status(500).json({ message: 'Server error' });
   }
 });
 
