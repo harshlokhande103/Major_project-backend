@@ -12,7 +12,9 @@ import cookieParser from 'cookie-parser'
 import rateLimit from 'express-rate-limit'
 import jwt from 'jsonwebtoken'
 import MentorApplication from './models/MentorApplication.js'
+import Notification from './models/Notification.js'
 import isAdmin from './middleware/isAdmin.js'
+import pagesRouter from './routes/pages.js'
 
 // Load environment variables
 dotenv.config()
@@ -59,6 +61,11 @@ app.use(
 
 // Static files
 app.use('/uploads', express.static(path.resolve('uploads')))
+
+// Lightweight health check for Postman
+app.get('/api/health', (req, res) => {
+  res.status(200).json({ ok: true })
+})
 
 // Database connection
 const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/Clarity_Call'
@@ -165,6 +172,7 @@ app.get('/', (req, res) => {
 })
 
 // API Routes
+app.use('/pages', pagesRouter)
 app.post('/api/users/:id/avatar', upload.single('avatar'), async (req, res) => {
   try {
     const { id } = req.params
@@ -261,13 +269,51 @@ app.put('/api/profile', requireAuth, async (req, res) => {
   }
 })
 
-// Admin - Get all mentor applications
+// Admin - Get all mentor applications with optional status filter
 app.get('/admin/mentor-applications', requireAuth, isAdmin, async (req, res) => {
   try {
-    const applications = await MentorApplication.find({}).populate('userId', 'firstName lastName email');
+    const { status } = req.query;
+    let filter = {};
+    
+    if (status && ['pending', 'approved', 'rejected'].includes(status)) {
+      filter.status = status;
+    }
+    
+    const applications = await MentorApplication.find(filter).populate('userId', 'firstName lastName email');
     res.status(200).json(applications);
   } catch (error) {
     console.error('Error fetching mentor applications:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Admin - Get application counts by status
+app.get('/admin/mentor-applications/counts', requireAuth, isAdmin, async (req, res) => {
+  try {
+    const counts = await MentorApplication.aggregate([
+      {
+        $group: {
+          _id: '$status',
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+    
+    const result = {
+      pending: 0,
+      approved: 0,
+      rejected: 0,
+      total: 0
+    };
+    
+    counts.forEach(item => {
+      result[item._id] = item.count;
+      result.total += item.count;
+    });
+    
+    res.status(200).json(result);
+  } catch (error) {
+    console.error('Error fetching application counts:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -295,6 +341,22 @@ app.put('/admin/mentor-applications/:id/status', requireAuth, isAdmin, async (re
     // If approved, update user role to mentor
     if (status === 'approved') {
       await User.findByIdAndUpdate(application.userId, { role: 'mentor' });
+      
+      // Create notification for mentor
+      await Notification.create({
+        userId: application.userId,
+        title: 'Mentor Application Approved! 🎉',
+        message: 'Congratulations! Your mentor application has been approved. You can now start hosting paid sessions.',
+        type: 'mentor_approved'
+      });
+    } else if (status === 'rejected') {
+      // Create notification for rejection
+      await Notification.create({
+        userId: application.userId,
+        title: 'Mentor Application Update',
+        message: 'Your mentor application has been reviewed. Please check your application details and reapply if needed.',
+        type: 'mentor_rejected'
+      });
     }
 
     res.status(200).json(application);
@@ -321,6 +383,78 @@ app.post('/api/mentor-applications', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('Error creating mentor application:', error);
     return res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Get user notifications
+app.get('/api/notifications', requireAuth, async (req, res) => {
+  try {
+    const userId = req.session.user.id;
+    const notifications = await Notification.find({ userId })
+      .sort({ createdAt: -1 })
+      .limit(50);
+    
+    res.status(200).json(notifications);
+  } catch (error) {
+    console.error('Error fetching notifications:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Mark notification as read
+app.put('/api/notifications/:id/read', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.session.user.id;
+    
+    const notification = await Notification.findOneAndUpdate(
+      { _id: id, userId },
+      { isRead: true, readAt: new Date() },
+      { new: true }
+    );
+    
+    if (!notification) {
+      return res.status(404).json({ message: 'Notification not found' });
+    }
+    
+    res.status(200).json(notification);
+  } catch (error) {
+    console.error('Error marking notification as read:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Mark all notifications as read
+app.put('/api/notifications/read-all', requireAuth, async (req, res) => {
+  try {
+    const userId = req.session.user.id;
+    
+    await Notification.updateMany(
+      { userId, isRead: false },
+      { isRead: true, readAt: new Date() }
+    );
+    
+    res.status(200).json({ message: 'All notifications marked as read' });
+  } catch (error) {
+    console.error('Error marking all notifications as read:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Check mentor application status
+app.get('/api/mentor-status', requireAuth, async (req, res) => {
+  try {
+    const userId = req.session.user.id;
+    const application = await MentorApplication.findOne({ userId });
+    
+    res.status(200).json({
+      hasApplication: !!application,
+      status: application?.status || null,
+      applicationDate: application?.applicationDate || null
+    });
+  } catch (error) {
+    console.error('Error checking mentor status:', error);
+    res.status(500).json({ message: 'Server error' });
   }
 });
 
