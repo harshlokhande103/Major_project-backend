@@ -458,6 +458,74 @@ app.get('/api/mentor-status', requireAuth, async (req, res) => {
   }
 });
 
+// Admin - Get all users
+app.get('/admin/users', requireAuth, isAdmin, async (req, res) => {
+  try {
+    const users = await User.find({}, 'firstName lastName email role title bio expertise createdAt isBlocked')
+      .sort({ createdAt: -1 });
+    res.status(200).json(users);
+  } catch (error) {
+    console.error('Error fetching users:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Admin - Update user status (block/unblock)
+app.put('/admin/users/:id/status', requireAuth, isAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { isBlocked } = req.body;
+    
+    const user = await User.findByIdAndUpdate(
+      id, 
+      { isBlocked }, 
+      { new: true }
+    );
+    
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    
+    res.status(200).json(user);
+  } catch (error) {
+    console.error('Error updating user status:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Admin - Delete user
+app.delete('/admin/users/:id', requireAuth, isAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const user = await User.findByIdAndDelete(id);
+    
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    
+    // Also delete related mentor applications
+    await MentorApplication.deleteMany({ userId: id });
+    
+    res.status(200).json({ message: 'User deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting user:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Logout endpoint
+app.post('/api/logout', (req, res) => {
+  req.session.destroy((err) => {
+    if (err) {
+      console.error('Session destruction error:', err);
+      return res.status(500).json({ message: 'Could not log out' });
+    }
+    res.clearCookie('connect.sid');
+    res.status(200).json({ message: 'Logged out successfully' });
+  });
+});
+
 // Start server
 const PORT = process.env.PORT || 5001
 app.listen(PORT, () => {
