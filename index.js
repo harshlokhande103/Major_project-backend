@@ -320,44 +320,77 @@ app.get('/admin/mentor-applications/counts', requireAuth, isAdmin, async (req, r
 
 // Admin - Update mentor application status
 app.put('/admin/mentor-applications/:id/status', requireAuth, isAdmin, async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  
   try {
     const { id } = req.params;
     const { status } = req.body;
 
     if (!['approved', 'rejected', 'pending'].includes(status)) {
+      await session.abortTransaction();
+      session.endSession();
       return res.status(400).json({ message: 'Invalid status' });
     }
 
-    const application = await MentorApplication.findByIdAndUpdate(
-      id,
-      { status },
-      { new: true }
-    );
-
+    // First, find the application with user details
+    const application = await MentorApplication.findById(id).session(session);
     if (!application) {
+      await session.abortTransaction();
+      session.endSession();
       return res.status(404).json({ message: 'Application not found' });
     }
 
+    // Get the user to be updated
+    const user = await User.findById(application.userId).session(session);
+    if (!user) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Update application status
+    application.status = status;
+    await application.save({ session });
+
+    let updatedUser = user;
     // If approved, update user role to mentor
     if (status === 'approved') {
-      await User.findByIdAndUpdate(application.userId, { role: 'mentor' });
+      user.role = 'mentor';
+      updatedUser = await user.save({ session });
       
       // Create notification for mentor
-      await Notification.create({
-        userId: application.userId,
+      await Notification.create([{
+        userId: user._id,
         title: 'Mentor Application Approved! 🎉',
         message: 'Congratulations! Your mentor application has been approved. You can now start hosting paid sessions.',
         type: 'mentor_approved'
-      });
+      }], { session });
     } else if (status === 'rejected') {
       // Create notification for rejection
-      await Notification.create({
-        userId: application.userId,
+      await Notification.create([{
+        userId: user._id,
         title: 'Mentor Application Update',
         message: 'Your mentor application has been reviewed. Please check your application details and reapply if needed.',
         type: 'mentor_rejected'
-      });
+      }], { session });
     }
+
+    // Commit the transaction
+    await session.commitTransaction();
+    session.endSession();
+
+    // Populate the response with user details
+    const response = {
+      ...application.toObject(),
+      user: {
+        _id: user._id,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        email: user.email,
+        role: user.role
+      }
+    };
 
     res.status(200).json(application);
   } catch (error) {
@@ -370,12 +403,30 @@ app.put('/admin/mentor-applications/:id/status', requireAuth, isAdmin, async (re
 app.post('/api/mentor-applications', requireAuth, async (req, res) => {
   try {
     const userId = req.session.user.id;
-    const { name, phoneNumber, bio, domain, linkedin, portfolio } = req.body;
+    const { phoneNumber, bio, domain, linkedin, portfolio } = req.body;
+    
+    // Get the authenticated user's information
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    
+    // Use the user's first and last name from their profile
+    const fullName = `${user.firstName} ${user.lastName}`.trim();
 
     // Upsert: create new or update existing application for this user
     const application = await MentorApplication.findOneAndUpdate(
       { userId },
-      { name, phoneNumber, bio, domain, linkedin, portfolio, applicationDate: new Date(), status: 'pending' },
+      { 
+        name: fullName, // Use the name from user's profile, not from request
+        phoneNumber, 
+        bio, 
+        domain, 
+        linkedin, 
+        portfolio, 
+        applicationDate: new Date(), 
+        status: 'pending' 
+      },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
