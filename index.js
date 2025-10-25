@@ -82,7 +82,13 @@ mongoose
     process.exit(1)
   })
 
+// Register mentor routes
+import mentorRouter from './routes/mentor.js';
+app.use('/api/mentors', mentorRouter);
+
 // User Schema
+
+
 const userSchema = new mongoose.Schema({
   firstName: { type: String, required: true, trim: true },
   lastName: { type: String, required: true, trim: true },
@@ -578,7 +584,7 @@ app.post('/api/logout', (req, res) => {
 });
 
 // Start server
-const PORT = process.env.PORT || 5001
+const PORT = process.env.PORT || 3000
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`)
 })

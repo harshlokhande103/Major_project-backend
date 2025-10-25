@@ -6,10 +6,11 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
-    "vercel-start" : "node index.js"
+    "vercel-start": "node index.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",
+    "cloudinary": "^2.8.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
