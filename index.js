@@ -23,7 +23,9 @@ dotenv.config()
 const app = express()
 
 // Security middleware
-app.use(helmet())
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' }
+}))
 app.use(express.json())
 app.use(cookieParser())
 
@@ -60,7 +62,7 @@ app.use(
 )
 
 // Static files
-app.use('/uploads', express.static(path.resolve('uploads')))
+// Static files for uploads will be registered after multer setup so we can reuse the same uploadsDir
 
 // Lightweight health check for Postman
 app.get('/api/health', (req, res) => {
@@ -97,6 +99,7 @@ const userSchema = new mongoose.Schema({
   profileImage: { type: String, default: '' },
   bio: { type: String, default: '' },
   title: { type: String, default: '' },
+  field: { type: String, default: '' },
   expertise: { type: [String], default: [] },
   isBlocked: { type: Boolean, default: false },
   lastActiveAt: { type: Date },
@@ -116,46 +119,6 @@ const requireAdmin = (req, res, next) => {
   return res.status(403).json({ message: 'Forbidden' })
 }
 
-// Rate limiting
-const authLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  limit: 10,
-  standardHeaders: true,
-  legacyHeaders: false
-})
-
-// Routes
-app.post('/api/register', authLimiter, async (req, res) => {
-  try {
-    const { firstName, lastName, email, password, bio, title, expertise } = req.body
-    
-    if (!firstName || !lastName || !email || !password) {
-      return res.status(400).json({ message: 'All fields are required' })
-    }
-
-    const existing = await User.findOne({ email })
-    if (existing) {
-      return res.status(409).json({ message: 'Email already registered' })
-    }
-
-    const hashedPassword = await bcrypt.hash(password, 10)
-    const user = await User.create({
-      firstName,
-      lastName, 
-      email,
-      password: hashedPassword,
-      bio,
-      title,
-      expertise
-    })
-
-    return res.status(201).json(user)
-  } catch (err) {
-    console.error(err)
-    return res.status(500).json({ message: 'Server error' })
-  }
-})
-
 // File upload configuration
 const uploadsDir = process.env.NODE_ENV === 'production' ? '/tmp/uploads' : path.resolve('uploads')
 if (!fs.existsSync(uploadsDir)) {
@@ -172,6 +135,61 @@ const storage = multer.diskStorage({
 })
 
 const upload = multer({ storage })
+
+// Serve uploaded files (ensure CORP allows cross-origin usage from frontend dev server)
+app.use('/uploads', (req, res, next) => {
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin')
+  next()
+}, express.static(uploadsDir))
+
+// Rate limiting
+const authLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false
+})
+
+// Routes
+app.post('/api/register', authLimiter, upload.single('profileImage'), async (req, res) => {
+  try {
+    const { firstName, lastName, email, password, bio, title, field, expertise } = req.body
+    
+    if (!firstName || !lastName || !email || !password) {
+      return res.status(400).json({ message: 'All fields are required' })
+    }
+
+    const existing = await User.findOne({ email })
+    if (existing) {
+      return res.status(409).json({ message: 'Email already registered' })
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10)
+    
+    // Handle profile image
+    let profileImagePath = '';
+    if (req.file) {
+      profileImagePath = `/uploads/${req.file.filename}`;
+    }
+
+    const user = await User.create({
+      firstName,
+      lastName, 
+      email,
+      password: hashedPassword,
+      bio,
+      title,
+      field,
+      expertise: expertise ? expertise.split(',').map(item => item.trim()) : [],
+      profileImage: profileImagePath
+    })
+
+    return res.status(201).json(user)
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ message: 'Server error' })
+  }
+})
 
 app.get('/', (req, res) => {
   res.send('Welcome to the Backend API!')
@@ -241,6 +259,11 @@ app.post('/api/login', authLimiter, async (req, res) => {
       email: user.email,
       firstName: user.firstName,
       lastName: user.lastName,
+      profileImage: user.profileImage,
+      bio: user.bio,
+      title: user.title,
+      field: user.field,
+      expertise: user.expertise,
       role: user.role
     })
 
@@ -250,10 +273,27 @@ app.post('/api/login', authLimiter, async (req, res) => {
   }
 })
 
+// Get user profile
+app.get('/api/profile', requireAuth, async (req, res) => {
+  try {
+    const userId = req.session.user.id
+    const user = await User.findById(userId).select('-password')
+    
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' })
+    }
+    
+    return res.status(200).json(user)
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ message: 'Server error' })
+  }
+})
+
 // Profile update
 app.put('/api/profile', requireAuth, async (req, res) => {
   try {
-    const { id, firstName, lastName, title, bio, expertise } = req.body
+    const { id, firstName, lastName, title, bio, expertise, field } = req.body
 
     const user = await User.findById(id)
     if (!user) {
@@ -264,6 +304,7 @@ app.put('/api/profile', requireAuth, async (req, res) => {
     user.lastName = lastName
     user.title = title
     user.bio = bio
+    user.field = field
     user.expertise = expertise
 
     await user.save()
