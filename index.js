@@ -127,7 +127,7 @@ const requireAdmin = (req, res, next) => {
 }
 
 // File upload configuration
-const uploadsDir = process.env.NODE_ENV === 'production' ? '/tmp/uploads' : path.resolve('uploads')
+const uploadsDir = process.env.UPLOADS_DIR || (process.env.NODE_ENV === 'production' ? '/tmp/uploads' : path.resolve('uploads'))
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true })
 }
