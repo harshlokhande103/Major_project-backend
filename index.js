@@ -3,6 +3,7 @@ import mongoose from 'mongoose'
 import cors from 'cors'
 import dotenv from 'dotenv'
 import multer from 'multer'
+import { v2 as cloudinary } from 'cloudinary'
 import path from 'path'
 import fs from 'fs'
 import bcrypt from 'bcryptjs'
@@ -10,7 +11,6 @@ import helmet from 'helmet'
 import session from 'express-session'
 import cookieParser from 'cookie-parser'
 import rateLimit from 'express-rate-limit'
-import jwt from 'jsonwebtoken'
 import MentorApplication from './models/MentorApplication.js'
 import Notification from './models/Notification.js'
 import isAdmin from './middleware/isAdmin.js'
@@ -29,24 +29,28 @@ app.use(helmet({
 app.use(express.json())
 app.use(cookieParser())
 
-// Explicitly set CORS headers for all responses
-app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', 'https://major-project-frontend-y7th.vercel.app');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
-  next();
-});
-
-// CORS for frontend dev server (send cookies)
+// CORS (single source of truth)
+const allowedOrigins = [
+  'http://localhost:5173',
+  'https://major-project-frontend-y7th.vercel.app'
+]
 app.use(
   cors({
-    origin: ['http://localhost:5173', 'https://major-project-frontend-y7th.vercel.app'],
+    origin: (origin, callback) => {
+      // allow non-browser or same-origin requests
+      if (!origin) return callback(null, true)
+      if (allowedOrigins.includes(origin)) return callback(null, true)
+      return callback(null, false)
+    },
     credentials: true
   })
 )
 
 // Session configuration
 const SESSION_SECRET = process.env.SESSION_SECRET || 'dev_insecure_secret_change_me'
+if (process.env.NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
+  console.error('SESSION_SECRET must be set in production')
+}
 app.use(
   session({
     secret: SESSION_SECRET,
@@ -55,7 +59,7 @@ app.use(
     cookie: {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
       maxAge: 1000 * 60 * 60 * 8 // 8 hours
     }
   })
@@ -71,6 +75,9 @@ app.get('/api/health', (req, res) => {
 
 // Database connection
 const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/Clarity_Call'
+if (process.env.NODE_ENV === 'production' && !process.env.MONGODB_URI) {
+  console.error('MONGODB_URI must be set in production')
+}
 
 mongoose.set('strictQuery', true)
 mongoose
@@ -151,6 +158,15 @@ const authLimiter = rateLimit({
 })
 
 // Routes
+// Configure Cloudinary if available (used in production for persistence)
+if (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET) {
+  cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET
+  })
+}
+
 app.post('/api/register', authLimiter, upload.single('profileImage'), async (req, res) => {
   try {
     const { firstName, lastName, email, password, bio, title, field, expertise } = req.body
@@ -169,7 +185,18 @@ app.post('/api/register', authLimiter, upload.single('profileImage'), async (req
     // Handle profile image
     let profileImagePath = '';
     if (req.file) {
-      profileImagePath = `/uploads/${req.file.filename}`;
+      // If Cloudinary is configured, upload there in production
+      if (process.env.NODE_ENV === 'production' && cloudinary.config().cloud_name) {
+        try {
+          const uploadResult = await cloudinary.uploader.upload(req.file.path, { folder: 'profile_images' })
+          profileImagePath = uploadResult.secure_url
+        } catch (e) {
+          console.error('Cloudinary upload failed, falling back to local path', e)
+          profileImagePath = `/uploads/${req.file.filename}`
+        }
+      } else {
+        profileImagePath = `/uploads/${req.file.filename}`
+      }
     }
 
     const user = await User.create({
@@ -204,7 +231,15 @@ app.post('/api/users/:id/avatar', upload.single('avatar'), async (req, res) => {
       return res.status(400).json({ message: 'No file uploaded' })
     }
 
-    const relativePath = `/uploads/${req.file.filename}`
+    let relativePath = `/uploads/${req.file.filename}`
+    if (process.env.NODE_ENV === 'production' && cloudinary.config().cloud_name) {
+      try {
+        const uploadResult = await cloudinary.uploader.upload(req.file.path, { folder: 'avatars' })
+        relativePath = uploadResult.secure_url
+      } catch (e) {
+        console.error('Cloudinary upload failed, using local path', e)
+      }
+    }
     const user = await User.findByIdAndUpdate(
       id,
       { profileImage: relativePath },
@@ -439,7 +474,7 @@ app.put('/admin/mentor-applications/:id/status', requireAuth, isAdmin, async (re
       }
     };
 
-    res.status(200).json(application);
+    res.status(200).json(response);
   } catch (error) {
     console.error('Error updating mentor application status:', error);
     res.status(500).json({ message: 'Server error' });
