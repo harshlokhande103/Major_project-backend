@@ -29,20 +29,35 @@ app.use(helmet({
 app.use(express.json())
 app.use(cookieParser())
 
+// Trust proxy when behind a reverse proxy (Render, Heroku, etc.) so secure cookies work
+if (process.env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1)
+}
+
 // CORS (single source of truth)
+// Use FRONTEND_URL or FRONTEND_ORIGINS (comma separated) from env so you don't have to change code each deploy
+const frontendOrigins = (process.env.FRONTEND_ORIGINS || process.env.FRONTEND_URL || 'http://localhost:5173')
+  .split(',')
+  .map(s => s.trim())
 const allowedOrigins = [
-  'http://localhost:5173',
+  // keep the local dev entry and any build-time example domains if you want
+  ...frontendOrigins,
   'https://major-project-frontend-y7th.vercel.app'
 ]
+
 app.use(
   cors({
     origin: (origin, callback) => {
-      // allow non-browser or same-origin requests
+      // allow non-browser or same-origin requests (Postman, server-to-server)
       if (!origin) return callback(null, true)
       if (allowedOrigins.includes(origin)) return callback(null, true)
-      return callback(null, false)
+      // optional: log rejected origin for easier debugging
+      console.warn('Blocked CORS origin:', origin)
+      return callback(new Error('Not allowed by CORS'))
     },
-    credentials: true
+    credentials: true,
+    // optional: set optionsSuccessStatus if older browsers/clients need 200 for preflight
+    optionsSuccessStatus: 200
   })
 )
 
@@ -58,8 +73,10 @@ app.use(
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      secure: process.env.NODE_ENV === 'production', // secure cookie in prod
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // none required for cross-site cookies
+      // domain can be set if you need cookies shared across subdomains:
+      // domain: process.env.SESSION_COOKIE_DOMAIN || undefined,
       maxAge: 1000 * 60 * 60 * 8 // 8 hours
     }
   })
