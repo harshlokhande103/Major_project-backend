@@ -13,6 +13,7 @@ import cookieParser from 'cookie-parser'
 import rateLimit from 'express-rate-limit'
 import MentorApplication from './models/MentorApplication.js'
 import Notification from './models/Notification.js'
+import Slot from './models/Slot.js' // <-- added import (keep near other model imports)
 import isAdmin from './middleware/isAdmin.js'
 import pagesRouter from './routes/pages.js'
 
@@ -661,6 +662,106 @@ app.delete('/admin/users/:id', requireAuth, isAdmin, async (req, res) => {
   }
 });
 
+// -------------------- Slots API for mentors --------------------
+// Get all slots for current authenticated mentor
+app.get('/api/slots', requireAuth, async (req, res) => {
+  try {
+    const userId = req.session.user.id;
+    const slots = await Slot.find({ mentorId: userId }).sort({ start: 1 });
+    res.status(200).json(slots);
+  } catch (err) {
+    console.error('Error fetching slots:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Create a slot
+app.post('/api/slots', requireAuth, async (req, res) => {
+  try {
+    const userId = req.session.user.id;
+    const { start, end, durationMinutes, price, label } = req.body;
+
+    if (!start) return res.status(400).json({ message: 'start datetime is required' });
+
+    const startDate = new Date(start);
+    if (isNaN(startDate)) return res.status(400).json({ message: 'Invalid start datetime' });
+
+    let endDate = null;
+    if (end) {
+      endDate = new Date(end);
+      if (isNaN(endDate)) return res.status(400).json({ message: 'Invalid end datetime' });
+    } else if (durationMinutes) {
+      endDate = new Date(startDate.getTime() + Number(durationMinutes) * 60000);
+    }
+
+    const created = await Slot.create({
+      mentorId: userId,
+      start: startDate,
+      end: endDate,
+      durationMinutes: durationMinutes ? Number(durationMinutes) : undefined,
+      price: price ? Number(price) : 0,
+      label: label || ''
+    });
+
+    res.status(201).json(created);
+  } catch (err) {
+    console.error('Error creating slot:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Update slot (only owner)
+app.put('/api/slots/:id', requireAuth, async (req, res) => {
+  try {
+    const userId = req.session.user.id;
+    const { id } = req.params;
+    const { start, end, durationMinutes, price, label } = req.body;
+
+    const slot = await Slot.findById(id);
+    if (!slot) return res.status(404).json({ message: 'Slot not found' });
+    if (String(slot.mentorId) !== String(userId)) return res.status(403).json({ message: 'Forbidden' });
+
+    if (start) {
+      const s = new Date(start);
+      if (isNaN(s)) return res.status(400).json({ message: 'Invalid start datetime' });
+      slot.start = s;
+    }
+    if (end) {
+      const e = new Date(end);
+      if (isNaN(e)) return res.status(400).json({ message: 'Invalid end datetime' });
+      slot.end = e;
+    } else if (durationMinutes) {
+      slot.durationMinutes = Number(durationMinutes);
+      slot.end = new Date(new Date(slot.start).getTime() + Number(durationMinutes) * 60000);
+    }
+    if (price !== undefined) slot.price = Number(price);
+    if (label !== undefined) slot.label = label;
+
+    await slot.save();
+    res.status(200).json(slot);
+  } catch (err) {
+    console.error('Error updating slot:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Delete slot (only owner)
+app.delete('/api/slots/:id', requireAuth, async (req, res) => {
+  try {
+    const userId = req.session.user.id;
+    const { id } = req.params;
+    const slot = await Slot.findById(id);
+    if (!slot) return res.status(404).json({ message: 'Slot not found' });
+    if (String(slot.mentorId) !== String(userId)) return res.status(403).json({ message: 'Forbidden' });
+
+    await Slot.findByIdAndDelete(id);
+    res.status(200).json({ message: 'Slot deleted' });
+  } catch (err) {
+    console.error('Error deleting slot:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // Logout endpoint
 app.post('/api/logout', (req, res) => {
   req.session.destroy((err) => {
@@ -671,6 +772,23 @@ app.post('/api/logout', (req, res) => {
     res.clearCookie('connect.sid');
     res.status(200).json({ message: 'Logged out successfully' });
   });
+});
+
+// Public: Get slots for a mentor (no auth required)
+app.get('/api/mentors/:id/slots', async (req, res) => {
+  try {
+    const mentorId = req.params.id;
+    if (!mentorId) return res.status(400).json({ message: 'mentor id required' });
+
+    // Find slots for the given mentor (only public fields)
+    const slots = await Slot.find({ mentorId }).sort({ start: 1 }).select('start end durationMinutes price label');
+
+    // Normalize to plain array
+    res.status(200).json(slots);
+  } catch (err) {
+    console.error('Error fetching mentor slots:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
 });
 
 // Start server
