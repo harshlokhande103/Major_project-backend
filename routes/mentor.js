@@ -1,5 +1,6 @@
 import express from 'express';
 import MentorApplication from '../models/MentorApplication.js';
+import Slot from '../models/Slot.js';
 import mongoose from 'mongoose';
 
 const router = express.Router();
@@ -35,6 +36,27 @@ router.get('/', async (req, res) => {
   } catch (err) {
     console.error('Error fetching mentors:', err);
     res.status(500).json({ error: 'Failed to fetch mentors' });
+  }
+});
+
+// GET /api/mentors/:id/slots - Get slots for a specific mentor
+router.get('/:id/slots', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Validate mentor exists and is approved
+    const mentor = await MentorApplication.findOne({ _id: id, status: 'approved' });
+    if (!mentor) {
+      return res.status(404).json({ error: 'Mentor not found or not approved' });
+    }
+
+    // Fetch slots for the mentor
+    const slots = await Slot.find({ mentorId: mentor.userId }).sort({ start: 1 });
+
+    res.status(200).json(slots);
+  } catch (err) {
+    console.error('Error fetching mentor slots:', err);
+    res.status(500).json({ error: 'Failed to fetch mentor slots' });
   }
 });
 
