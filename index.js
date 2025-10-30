@@ -98,10 +98,7 @@ if (process.env.NODE_ENV === 'production' && !process.env.MONGODB_URI) {
 
 mongoose.set('strictQuery', true)
 mongoose
-  .connect(mongoUri, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true
-  })
+  .connect(mongoUri)
   .then(() => console.log('MongoDB connected'))
   .catch(err => {
     console.error('MongoDB connection error:', err)
