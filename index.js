@@ -14,6 +14,7 @@ import rateLimit from 'express-rate-limit'
 import MentorApplication from './models/MentorApplication.js'
 import Notification from './models/Notification.js'
 import Slot from './models/Slot.js' // <-- added import (keep near other model imports)
+import Booking from './models/Booking.js'
 import isAdmin from './middleware/isAdmin.js'
 import pagesRouter from './routes/pages.js'
 
@@ -787,6 +788,116 @@ app.get('/api/mentors/:id/slots', async (req, res) => {
     res.status(200).json(slots);
   } catch (err) {
     console.error('Error fetching mentor slots:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// -------------------- Bookings API --------------------
+// Create a booking
+app.post('/api/bookings', requireAuth, async (req, res) => {
+  try {
+    const userId = req.session.user.id;
+    const { slotId, notes } = req.body;
+
+    if (!slotId) return res.status(400).json({ message: 'slotId is required' });
+
+    // Find the slot and ensure it exists
+    const slot = await Slot.findById(slotId);
+    if (!slot) return res.status(404).json({ message: 'Slot not found' });
+
+    // Check if slot is already booked
+    const existingBooking = await Booking.findOne({ slotId });
+    if (existingBooking) return res.status(409).json({ message: 'Slot already booked' });
+
+    // Prevent booking own slots
+    if (String(slot.mentorId) === String(userId)) {
+      return res.status(400).json({ message: 'Cannot book your own slot' });
+    }
+
+    // Create booking
+    const booking = await Booking.create({
+      userId,
+      slotId,
+      mentorId: slot.mentorId,
+      notes: notes || '',
+      status: 'confirmed'
+    });
+
+    // Populate booking details for response
+    const populatedBooking = await Booking.findById(booking._id)
+      .populate('userId', 'firstName lastName email')
+      .populate('mentorId', 'firstName lastName email')
+      .populate('slotId');
+
+    res.status(201).json(populatedBooking);
+  } catch (err) {
+    console.error('Error creating booking:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Get user's bookings
+app.get('/api/bookings', requireAuth, async (req, res) => {
+  try {
+    const userId = req.session.user.id;
+    const bookings = await Booking.find({ userId })
+      .populate('mentorId', 'firstName lastName email profileImage title')
+      .populate('slotId')
+      .sort({ createdAt: -1 });
+
+    res.status(200).json(bookings);
+  } catch (err) {
+    console.error('Error fetching bookings:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Get mentor's bookings (for mentors to see their booked sessions)
+app.get('/api/mentor/bookings', requireAuth, async (req, res) => {
+  try {
+    const mentorId = req.session.user.id;
+    const bookings = await Booking.find({ mentorId })
+      .populate('userId', 'firstName lastName email profileImage')
+      .populate('slotId')
+      .sort({ createdAt: -1 });
+
+    res.status(200).json(bookings);
+  } catch (err) {
+    console.error('Error fetching mentor bookings:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Update booking status (mentor can cancel, complete, etc.)
+app.put('/api/bookings/:id', requireAuth, async (req, res) => {
+  try {
+    const userId = req.session.user.id;
+    const { id } = req.params;
+    const { status, meetingLink } = req.body;
+
+    const booking = await Booking.findById(id);
+    if (!booking) return res.status(404).json({ message: 'Booking not found' });
+
+    // Only mentor or the user who booked can update
+    if (String(booking.mentorId) !== String(userId) && String(booking.userId) !== String(userId)) {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
+
+    // Update fields
+    if (status) booking.status = status;
+    if (meetingLink !== undefined) booking.meetingLink = meetingLink;
+
+    await booking.save();
+
+    // Populate for response
+    const populatedBooking = await Booking.findById(booking._id)
+      .populate('userId', 'firstName lastName email')
+      .populate('mentorId', 'firstName lastName email')
+      .populate('slotId');
+
+    res.status(200).json(populatedBooking);
+  } catch (err) {
+    console.error('Error updating booking:', err);
     res.status(500).json({ message: 'Server error' });
   }
 });
