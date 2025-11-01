@@ -32,10 +32,9 @@ app.use(helmet({
 app.use(express.json())
 app.use(cookieParser())
 
-// Trust proxy when behind a reverse proxy (Render, Heroku, etc.) so secure cookies work
-if (process.env.NODE_ENV === 'production') {
-  app.set('trust proxy', 1)
-}
+// Trust proxy when behind a reverse proxy (Render, Heroku, etc.) so secure cookies and client IPs work
+// Render sets env RENDER=true; we can also just always trust first proxy safely in this deployment
+app.set('trust proxy', 1)
 
 // CORS (single source of truth)
 // Use FRONTEND_URL or FRONTEND_ORIGINS (comma separated) from env so you don't have to change code each deploy
