@@ -44,7 +44,7 @@ const frontendOrigins = (process.env.FRONTEND_ORIGINS || process.env.FRONTEND_UR
 const allowedOrigins = [
   // keep the local dev entry and any build-time example domains if you want
   ...frontendOrigins,
-  'https://major-project-frontend-y7th.vercel.app'
+  'https://claritycall.onrender.com'
 ]
 
 app.use(
