@@ -3,6 +3,9 @@ import mongoose from 'mongoose';
 import ChatConversation from '../models/ChatConversation.js';
 import ChatMessage from '../models/ChatMessage.js';
 import Notification from '../models/Notification.js';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
 
 const router = express.Router();
 
@@ -11,6 +14,22 @@ const requireAuth = (req, res, next) => {
   if (req.session?.user?.id) return next();
   return res.status(401).json({ message: 'Unauthorized' });
 };
+
+// Configure storage specifically for chat attachments. We intentionally mirror index.js uploadsDir
+const baseUploadsDir = process.env.UPLOADS_DIR || (process.env.NODE_ENV === 'production' ? '/tmp/uploads' : path.resolve('uploads'));
+const chatUploadsDir = path.join(baseUploadsDir, 'chat');
+if (!fs.existsSync(chatUploadsDir)) {
+  fs.mkdirSync(chatUploadsDir, { recursive: true });
+}
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, chatUploadsDir),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    const base = path.basename(file.originalname, ext).replace(/[^a-zA-Z0-9-_]/g, '');
+    cb(null, `${base}-${Date.now()}${ext}`);
+  }
+});
+const upload = multer({ storage, limits: { fileSize: 20 * 1024 * 1024 } }); // 20MB limit
 
 // Create or get a conversation between a user and mentor
 router.post('/conversation', requireAuth, async (req, res) => {
@@ -28,6 +47,51 @@ router.post('/conversation', requireAuth, async (req, res) => {
     return res.status(200).json({ id: conv._id });
   } catch (e) {
     console.error('Create/get conversation error', e);
+    return res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Send a message with a single attachment (image/video/pdf/any file)
+router.post('/messages/attachment', requireAuth, upload.single('file'), async (req, res) => {
+  try {
+    const { conversationId, text = '' } = req.body;
+    if (!conversationId) return res.status(400).json({ message: 'conversationId required' });
+    if (!req.file) return res.status(400).json({ message: 'file is required' });
+
+    const me = new mongoose.Types.ObjectId(String(req.session.user.id));
+    const conv = await ChatConversation.findById(conversationId);
+    if (!conv) return res.status(404).json({ message: 'Conversation not found' });
+    if (!conv.participants.map(String).includes(String(me))) return res.status(403).json({ message: 'Forbidden' });
+
+    // Build public URL using the same static mount: '/uploads'
+    const rel = `/uploads/chat/${req.file.filename}`;
+    const attachments = [{
+      url: rel,
+      name: req.file.originalname || req.file.filename,
+      size: req.file.size || 0,
+      mime: req.file.mimetype || ''
+    }];
+
+    const msg = await ChatMessage.create({ conversationId, senderId: me, text: text || '', attachments });
+
+    conv.lastMessageAt = new Date();
+    conv.lastMessageText = text ? text.slice(0, 500) : (attachments[0].name || 'Attachment');
+    await conv.save();
+
+    const recipient = conv.participants.find(p => String(p) !== String(me));
+    if (recipient) {
+      await Notification.create({
+        userId: recipient,
+        title: 'New attachment',
+        message: text ? text.slice(0, 80) : (attachments[0].name || 'Attachment'),
+        type: 'chat_message',
+        data: { conversationId: conv._id.toString() }
+      });
+    }
+
+    return res.status(201).json(msg);
+  } catch (e) {
+    console.error('Send attachment error', e);
     return res.status(500).json({ message: 'Server error' });
   }
 });
