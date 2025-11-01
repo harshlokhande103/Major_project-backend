@@ -16,9 +16,10 @@ const notificationSchema = new mongoose.Schema({
   },
   type: {
     type: String,
-    enum: ['mentor_approved', 'mentor_rejected', 'general'],
+    enum: ['mentor_approved', 'mentor_rejected', 'general', 'chat_message'],
     default: 'general'
   },
+  data: { type: Object, default: {} },
   isRead: {
     type: Boolean,
     default: false

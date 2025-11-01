@@ -17,6 +17,7 @@ import Slot from './models/Slot.js' // <-- added import (keep near other model i
 import Booking from './models/Booking.js'
 import isAdmin from './middleware/isAdmin.js'
 import pagesRouter from './routes/pages.js'
+import chatRouter from './routes/chat.js'
 
 // Load environment variables
 dotenv.config()
@@ -240,6 +241,7 @@ app.get('/', (req, res) => {
 
 // API Routes
 app.use('/pages', pagesRouter)
+app.use('/api/chat', chatRouter)
 app.post('/api/users/:id/avatar', upload.single('avatar'), async (req, res) => {
   try {
     const { id } = req.params
