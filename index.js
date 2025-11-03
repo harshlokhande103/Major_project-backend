@@ -37,14 +37,9 @@ app.use(cookieParser())
 app.set('trust proxy', 1)
 
 // CORS (single source of truth)
-// Use FRONTEND_URL or FRONTEND_ORIGINS (comma separated) from env so you don't have to change code each deploy
-const frontendOrigins = (process.env.FRONTEND_ORIGINS || process.env.FRONTEND_URL || 'http://localhost:5173')
-  .split(',')
-  .map(s => s.trim())
 const allowedOrigins = [
-  // keep the local dev entry and any build-time example domains if you want
-  ...frontendOrigins,
-  'https://claritycall.onrender.com'
+  'https://claritycall.onrender.com',  // frontend deployed link
+  'http://localhost:5173',             // local dev link
 ]
 
 app.use(
