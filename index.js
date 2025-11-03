@@ -40,6 +40,8 @@ app.set('trust proxy', 1)
 const allowedOrigins = [
   'https://claritycall.onrender.com',  // frontend deployed link
   'http://localhost:5173',             // local dev link
+  'https://major-project-frontend-five.vercel.app', // vercel frontend
+  'https://major-project-backend-chi.vercel.app'    // vercel backend (allow server-to-server / same-site fetches)
 ]
 
 app.use(
