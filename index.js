@@ -9,6 +9,7 @@ import fs from 'fs'
 import bcrypt from 'bcryptjs'
 import helmet from 'helmet'
 import session from 'express-session'
+import MongoStore from 'connect-mongo'
 import cookieParser from 'cookie-parser'
 import rateLimit from 'express-rate-limit'
 import MentorApplication from './models/MentorApplication.js'
@@ -60,7 +61,7 @@ app.use(
   })
 )
 
-// Session configuration
+// Session configuration (Mongo-backed for serverless)
 const SESSION_SECRET = process.env.SESSION_SECRET || 'dev_insecure_secret_change_me'
 if (process.env.NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
   console.error('SESSION_SECRET must be set in production')
@@ -68,15 +69,20 @@ if (process.env.NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
 app.use(
   session({
     secret: SESSION_SECRET,
-    resave: false, 
+    resave: false,
     saveUninitialized: false,
+    store: MongoStore.create({
+      mongoUrl: process.env.MONGODB_URI || 'mongodb://localhost:27017/Clarity_Call',
+      collectionName: 'sessions',
+      stringify: false,
+      ttl: 60 * 60 * 8 // 8 hours in seconds
+    }),
     cookie: {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production', // secure cookie in prod
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // none required for cross-site cookies
-      // domain can be set if you need cookies shared across subdomains:
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
       // domain: process.env.SESSION_COOKIE_DOMAIN || undefined,
-      maxAge: 1000 * 60 * 60 * 8 // 8 hours
+      maxAge: 1000 * 60 * 60 * 8
     }
   })
 )
