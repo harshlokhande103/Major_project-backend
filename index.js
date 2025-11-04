@@ -37,29 +37,11 @@ app.use(cookieParser())
 // Render sets env RENDER=true; we can also just always trust first proxy safely in this deployment
 app.set('trust proxy', 1)
 
-// CORS (single source of truth)
-const allowedOrigins = [
-  'https://claritycall.onrender.com',  // frontend deployed link
-  'http://localhost:5173',             // local dev link
-  'https://major-project-frontend-five.vercel.app', // vercel frontend
-  'https://major-project-backend-chi.vercel.app'    // vercel backend (allow server-to-server / same-site fetches)
-]
-
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      // allow non-browser or same-origin requests (Postman, server-to-server)
-      if (!origin) return callback(null, true)
-      if (allowedOrigins.includes(origin)) return callback(null, true)
-      // optional: log rejected origin for easier debugging
-      console.warn('Blocked CORS origin:', origin)
-      return callback(new Error('Not allowed by CORS'))
-    },
-    credentials: true,
-    // optional: set optionsSuccessStatus if older browsers/clients need 200 for preflight
-    optionsSuccessStatus: 200
-  })
-)
+// CORS (allow only frontend on Vercel with credentials)
+app.use(cors({
+  origin: 'https://major-project-frontend-five.vercel.app',
+  credentials: true
+}))
 
 // Session configuration (Mongo-backed for serverless)
 const SESSION_SECRET = process.env.SESSION_SECRET || 'dev_insecure_secret_change_me'
