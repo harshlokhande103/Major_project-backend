@@ -37,11 +37,21 @@ app.use(cookieParser())
 // Render sets env RENDER=true; we can also just always trust first proxy safely in this deployment
 app.set('trust proxy', 1)
 
-// CORS (allow only frontend on Vercel with credentials)
-app.use(cors({
-  origin: 'https://major-project-frontend-five.vercel.app',
-  credentials: true
-}))
+// CORS (allow local dev and deployed frontend with credentials)
+const corsOptions = {
+  origin: [
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'https://major-project-frontend-five.vercel.app'
+  ],
+  credentials: true,
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  optionsSuccessStatus: 204
+}
+app.use(cors(corsOptions))
+// Explicitly handle preflight for all routes
+app.options('*', cors(corsOptions))
 
 // Session configuration (Mongo-backed for serverless)
 const SESSION_SECRET = process.env.SESSION_SECRET || 'dev_insecure_secret_change_me'
