@@ -21,10 +21,8 @@ router.get('/', async (req, res) => {
       email: mentor.userId.email,
       profileImage: mentor.userId.profileImage,
       bio: mentor.bio || mentor.userId.bio,
-      domain: mentor.domain,
-      title: mentor.userId.title,
-      field: mentor.userId.field,
-      expertise: mentor.userId.expertise,
+      // prefer user field; fallback to legacy domain if present
+      field: mentor.userId.field || mentor.domain || '',
       phoneNumber: mentor.phoneNumber,
       linkedin: mentor.linkedin,
       portfolio: mentor.portfolio,

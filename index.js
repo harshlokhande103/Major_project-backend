@@ -617,7 +617,7 @@ app.get('/api/mentor-status', requireAuth, async (req, res) => {
 // Admin - Get all users
 const handleGetUsers = async (req, res) => {
   try {
-    const users = await User.find({}, 'firstName lastName email role title bio expertise createdAt isBlocked')
+    const users = await User.find({}, 'firstName lastName email role field bio createdAt isBlocked')
       .sort({ createdAt: -1 });
     res.status(200).json(users);
   } catch (error) {
