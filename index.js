@@ -71,8 +71,10 @@ app.use(
     }),
     cookie: {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      // For local dev with Vite proxy (same-origin), use non-secure and SameSite=Lax
+      // For production/serverless (cross-site), use Secure + SameSite=None
+      secure: !!process.env.VERCEL || process.env.NODE_ENV === 'production',
+      sameSite: (!!process.env.VERCEL || process.env.NODE_ENV === 'production') ? 'none' : 'lax',
       // domain: process.env.SESSION_COOKIE_DOMAIN || undefined,
       maxAge: 1000 * 60 * 60 * 8
     }
@@ -364,7 +366,7 @@ app.put('/api/profile', requireAuth, async (req, res) => {
 })
 
 // Admin - Get all mentor applications with optional status filter
-app.get('/admin/mentor-applications', requireAuth, isAdmin, async (req, res) => {
+const handleGetMentorApplications = async (req, res) => {
   try {
     const { status } = req.query;
     let filter = {};
@@ -379,10 +381,13 @@ app.get('/admin/mentor-applications', requireAuth, isAdmin, async (req, res) => 
     console.error('Error fetching mentor applications:', error);
     res.status(500).json({ message: 'Server error' });
   }
-});
+};
+
+app.get('/admin/mentor-applications', requireAuth, isAdmin, handleGetMentorApplications);
+app.get('/api/admin/mentor-applications', requireAuth, isAdmin, handleGetMentorApplications);
 
 // Admin - Get application counts by status
-app.get('/admin/mentor-applications/counts', requireAuth, isAdmin, async (req, res) => {
+const handleGetMentorApplicationCounts = async (req, res) => {
   try {
     const counts = await MentorApplication.aggregate([
       {
@@ -410,10 +415,13 @@ app.get('/admin/mentor-applications/counts', requireAuth, isAdmin, async (req, r
     console.error('Error fetching application counts:', error);
     res.status(500).json({ message: 'Server error' });
   }
-});
+};
+
+app.get('/admin/mentor-applications/counts', requireAuth, isAdmin, handleGetMentorApplicationCounts);
+app.get('/api/admin/mentor-applications/counts', requireAuth, isAdmin, handleGetMentorApplicationCounts);
 
 // Admin - Update mentor application status
-app.put('/admin/mentor-applications/:id/status', requireAuth, isAdmin, async (req, res) => {
+const handleUpdateMentorApplicationStatus = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   
@@ -491,7 +499,10 @@ app.put('/admin/mentor-applications/:id/status', requireAuth, isAdmin, async (re
     console.error('Error updating mentor application status:', error);
     res.status(500).json({ message: 'Server error' });
   }
-});
+};
+
+app.put('/admin/mentor-applications/:id/status', requireAuth, isAdmin, handleUpdateMentorApplicationStatus);
+app.put('/api/admin/mentor-applications/:id/status', requireAuth, isAdmin, handleUpdateMentorApplicationStatus);
 
 // Mentor - Create or update an application
 app.post('/api/mentor-applications', requireAuth, async (req, res) => {
@@ -604,7 +615,7 @@ app.get('/api/mentor-status', requireAuth, async (req, res) => {
 });
 
 // Admin - Get all users
-app.get('/admin/users', requireAuth, isAdmin, async (req, res) => {
+const handleGetUsers = async (req, res) => {
   try {
     const users = await User.find({}, 'firstName lastName email role title bio expertise createdAt isBlocked')
       .sort({ createdAt: -1 });
@@ -613,10 +624,13 @@ app.get('/admin/users', requireAuth, isAdmin, async (req, res) => {
     console.error('Error fetching users:', error);
     res.status(500).json({ message: 'Server error' });
   }
-});
+};
+
+app.get('/admin/users', requireAuth, isAdmin, handleGetUsers);
+app.get('/api/admin/users', requireAuth, isAdmin, handleGetUsers);
 
 // Admin - Update user status (block/unblock)
-app.put('/admin/users/:id/status', requireAuth, isAdmin, async (req, res) => {
+const handleUpdateUserStatus = async (req, res) => {
   try {
     const { id } = req.params;
     const { isBlocked } = req.body;
@@ -636,10 +650,13 @@ app.put('/admin/users/:id/status', requireAuth, isAdmin, async (req, res) => {
     console.error('Error updating user status:', error);
     res.status(500).json({ message: 'Server error' });
   }
-});
+};
+
+app.put('/admin/users/:id/status', requireAuth, isAdmin, handleUpdateUserStatus);
+app.put('/api/admin/users/:id/status', requireAuth, isAdmin, handleUpdateUserStatus);
 
 // Admin - Delete user
-app.delete('/admin/users/:id', requireAuth, isAdmin, async (req, res) => {
+const handleDeleteUser = async (req, res) => {
   try {
     const { id } = req.params;
     
@@ -657,7 +674,10 @@ app.delete('/admin/users/:id', requireAuth, isAdmin, async (req, res) => {
     console.error('Error deleting user:', error);
     res.status(500).json({ message: 'Server error' });
   }
-});
+};
+
+app.delete('/admin/users/:id', requireAuth, isAdmin, handleDeleteUser);
+app.delete('/api/admin/users/:id', requireAuth, isAdmin, handleDeleteUser);
 
 // -------------------- Slots API for mentors --------------------
 // Get all slots for current authenticated mentor
