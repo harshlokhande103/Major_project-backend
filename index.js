@@ -898,8 +898,12 @@ app.put('/api/bookings/:id', requireAuth, async (req, res) => {
   }
 });
 
-// Start server
+// Start server (local dev only). On Vercel, export the app for serverless.
 const PORT = process.env.PORT || 3000
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`)
-})
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`)
+  })
+}
+
+export default app
