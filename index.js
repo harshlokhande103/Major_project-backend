@@ -320,6 +320,30 @@ app.get('/api/profile', requireAuth, async (req, res) => {
   }
 })
 
+// Public: list users (limited fields)
+app.get('/api/users', async (req, res) => {
+  try {
+    const users = await User.find({}, 'firstName lastName email profileImage role field bio').lean()
+    return res.status(200).json(Array.isArray(users) ? users : [])
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ message: 'Server error' })
+  }
+})
+
+// Public: get user by id (without password)
+app.get('/api/user/:id', async (req, res) => {
+  try {
+    const { id } = req.params
+    const user = await User.findById(id).select('-password').lean()
+    if (!user) return res.status(404).json({ message: 'User not found' })
+    return res.status(200).json(user)
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ message: 'Server error' })
+  }
+})
+
 // Profile update
 app.put('/api/profile', requireAuth, async (req, res) => {
   try {
