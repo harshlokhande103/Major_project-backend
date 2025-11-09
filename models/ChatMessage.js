@@ -8,7 +8,8 @@ const chatMessageSchema = new mongoose.Schema({
     url: { type: String, required: true },
     name: { type: String, default: '' },
     size: { type: Number, default: 0 },
-    mime: { type: String, default: '' }
+    mime: { type: String, default: '' },
+    data: { type: Buffer }
   }],
   readBy: { type: [mongoose.Schema.Types.ObjectId], ref: 'User', default: [] },
 }, { timestamps: true, versionKey: false });

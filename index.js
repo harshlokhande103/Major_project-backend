@@ -117,6 +117,8 @@ const userSchema = new mongoose.Schema({
   email: { type: String, required: true, trim: true, lowercase: true, unique: true },
   password: { type: String, required: true },
   profileImage: { type: String, default: '' },
+  profileImageData: { type: Buffer },
+  profileImageContentType: { type: String, default: '' },
   bio: { type: String, default: '' },
   title: { type: String, default: '' },
   field: { type: String, default: '' },
@@ -139,28 +141,9 @@ const requireAdmin = (req, res, next) => {
   return res.status(403).json({ message: 'Forbidden' })
 }
 
-// File upload configuration
-const uploadsDir = process.env.UPLOADS_DIR || (process.env.NODE_ENV === 'production' ? '/tmp/uploads' : path.resolve('uploads'))
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true })
-}
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadsDir),
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname)
-    const base = path.basename(file.originalname, ext).replace(/[^a-zA-Z0-9-_]/g, '')
-    cb(null, `${base}-${Date.now()}${ext}`)
-  }
-})
-
+// File upload configuration -> store in MongoDB (no filesystem)
+const storage = multer.memoryStorage()
 const upload = multer({ storage })
-
-// Serve uploaded files (ensure CORP allows cross-origin usage from frontend dev server)
-app.use('/uploads', (req, res, next) => {
-  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin')
-  next()
-}, express.static(uploadsDir))
 
 // Rate limiting
 const authLimiter = rateLimit({
@@ -195,23 +178,7 @@ app.post('/api/register', authLimiter, upload.single('profileImage'), async (req
 
     const hashedPassword = await bcrypt.hash(password, 10)
     
-    // Handle profile image
-    let profileImagePath = '';
-    if (req.file) {
-      // If Cloudinary is configured, upload there in production
-      if (process.env.NODE_ENV === 'production' && cloudinary.config().cloud_name) {
-        try {
-          const uploadResult = await cloudinary.uploader.upload(req.file.path, { folder: 'profile_images' })
-          profileImagePath = uploadResult.secure_url
-        } catch (e) {
-          console.error('Cloudinary upload failed, falling back to local path', e)
-          profileImagePath = `/uploads/${req.file.filename}`
-        }
-      } else {
-        profileImagePath = `/uploads/${req.file.filename}`
-      }
-    }
-
+    // Create user first (so we have id for avatar URL)
     const user = await User.create({
       firstName,
       lastName, 
@@ -221,8 +188,17 @@ app.post('/api/register', authLimiter, upload.single('profileImage'), async (req
       title,
       field,
       expertise: expertise ? expertise.split(',').map(item => item.trim()) : [],
-      profileImage: profileImagePath
+      profileImage: ''
     })
+
+    // Handle profile image -> store in DB
+    if (req.file && req.file.buffer) {
+      user.profileImageData = req.file.buffer
+      user.profileImageContentType = req.file.mimetype || 'application/octet-stream'
+      // expose a stable URL for frontend
+      user.profileImage = `/api/users/${user._id}/avatar`
+      await user.save()
+    }
 
     return res.status(201).json(user)
   } catch (err) {
@@ -244,25 +220,14 @@ app.post('/api/users/:id/avatar', upload.single('avatar'), async (req, res) => {
     if (!req.file) {
       return res.status(400).json({ message: 'No file uploaded' })
     }
-
-    let relativePath = `/uploads/${req.file.filename}`
-    if (process.env.NODE_ENV === 'production' && cloudinary.config().cloud_name) {
-      try {
-        const uploadResult = await cloudinary.uploader.upload(req.file.path, { folder: 'avatars' })
-        relativePath = uploadResult.secure_url
-      } catch (e) {
-        console.error('Cloudinary upload failed, using local path', e)
-      }
-    }
-    const user = await User.findByIdAndUpdate(
-      id,
-      { profileImage: relativePath },
-      { new: true }
-    )
-
+    const user = await User.findById(id)
     if (!user) {
       return res.status(404).json({ message: 'User not found' })
     }
+    user.profileImageData = req.file.buffer
+    user.profileImageContentType = req.file.mimetype || 'application/octet-stream'
+    user.profileImage = `/api/users/${user._id}/avatar`
+    await user.save()
 
     return res.status(200).json({
       id: user._id,
@@ -273,6 +238,22 @@ app.post('/api/users/:id/avatar', upload.single('avatar'), async (req, res) => {
     })
   } catch (err) {
     console.error(err)
+    return res.status(500).json({ message: 'Server error' })
+  }
+})
+
+// Serve user avatar from MongoDB
+app.get('/api/users/:id/avatar', async (req, res) => {
+  try {
+    const { id } = req.params
+    const user = await User.findById(id).select('profileImageData profileImageContentType')
+    if (!user || !user.profileImageData) {
+      return res.status(404).json({ message: 'Avatar not found' })
+    }
+    res.setHeader('Content-Type', user.profileImageContentType || 'application/octet-stream')
+    return res.status(200).send(user.profileImageData)
+  } catch (err) {
+    console.error('Avatar fetch error', err)
     return res.status(500).json({ message: 'Server error' })
   }
 })

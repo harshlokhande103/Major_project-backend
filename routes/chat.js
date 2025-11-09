@@ -4,8 +4,6 @@ import ChatConversation from '../models/ChatConversation.js';
 import ChatMessage from '../models/ChatMessage.js';
 import Notification from '../models/Notification.js';
 import multer from 'multer';
-import path from 'path';
-import fs from 'fs';
 
 const router = express.Router();
 
@@ -15,20 +13,8 @@ const requireAuth = (req, res, next) => {
   return res.status(401).json({ message: 'Unauthorized' });
 };
 
-// Configure storage specifically for chat attachments. We intentionally mirror index.js uploadsDir
-const baseUploadsDir = process.env.UPLOADS_DIR || (process.env.NODE_ENV === 'production' ? '/tmp/uploads' : path.resolve('uploads'));
-const chatUploadsDir = path.join(baseUploadsDir, 'chat');
-if (!fs.existsSync(chatUploadsDir)) {
-  fs.mkdirSync(chatUploadsDir, { recursive: true });
-}
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, chatUploadsDir),
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    const base = path.basename(file.originalname, ext).replace(/[^a-zA-Z0-9-_]/g, '');
-    cb(null, `${base}-${Date.now()}${ext}`);
-  }
-});
+// Configure memory storage for chat attachments; data will be stored in MongoDB
+const storage = multer.memoryStorage();
 const upload = multer({ storage, limits: { fileSize: 20 * 1024 * 1024 } }); // 20MB limit
 
 // Create or get a conversation between a user and mentor
@@ -63,19 +49,21 @@ router.post('/messages/attachment', requireAuth, upload.single('file'), async (r
     if (!conv) return res.status(404).json({ message: 'Conversation not found' });
     if (!conv.participants.map(String).includes(String(me))) return res.status(403).json({ message: 'Forbidden' });
 
-    // Build public URL using the same static mount: '/uploads'
-    const rel = `/uploads/chat/${req.file.filename}`;
-    const attachments = [{
-      url: rel,
-      name: req.file.originalname || req.file.filename,
+    // First create message with placeholder; then update URL using created id
+    const provisional = {
+      url: '',
+      name: req.file.originalname || 'file',
       size: req.file.size || 0,
-      mime: req.file.mimetype || ''
-    }];
-
-    const msg = await ChatMessage.create({ conversationId, senderId: me, text: text || '', attachments });
+      mime: req.file.mimetype || '',
+      data: req.file.buffer
+    };
+    let msg = await ChatMessage.create({ conversationId, senderId: me, text: text || '', attachments: [provisional] });
+    const rel = `/api/chat/attachments/${msg._id}/0`;
+    msg.attachments[0].url = rel;
+    await msg.save();
 
     conv.lastMessageAt = new Date();
-    conv.lastMessageText = text ? text.slice(0, 500) : (attachments[0].name || 'Attachment');
+    conv.lastMessageText = text ? text.slice(0, 500) : (msg.attachments[0].name || 'Attachment');
     await conv.save();
 
     const recipient = conv.participants.find(p => String(p) !== String(me));
@@ -83,7 +71,7 @@ router.post('/messages/attachment', requireAuth, upload.single('file'), async (r
       await Notification.create({
         userId: recipient,
         title: 'New attachment',
-        message: text ? text.slice(0, 80) : (attachments[0].name || 'Attachment'),
+        message: text ? text.slice(0, 80) : (msg.attachments[0].name || 'Attachment'),
         type: 'chat_message',
         data: { conversationId: conv._id.toString() }
       });
@@ -92,6 +80,30 @@ router.post('/messages/attachment', requireAuth, upload.single('file'), async (r
     return res.status(201).json(msg);
   } catch (e) {
     console.error('Send attachment error', e);
+    return res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Fetch a chat attachment by message id and index
+router.get('/attachments/:messageId/:index', requireAuth, async (req, res) => {
+  try {
+    const { messageId, index } = req.params;
+    const msg = await ChatMessage.findById(messageId).lean();
+    if (!msg) return res.status(404).json({ message: 'Message not found' });
+
+    // Authorization: must be participant of the conversation
+    const conv = await ChatConversation.findById(msg.conversationId).lean();
+    if (!conv) return res.status(404).json({ message: 'Conversation not found' });
+    const me = String(req.session.user.id);
+    if (!conv.participants.map(String).includes(me)) return res.status(403).json({ message: 'Forbidden' });
+
+    const idx = Number(index) || 0;
+    const att = msg.attachments?.[idx];
+    if (!att || !att.data) return res.status(404).json({ message: 'Attachment not found' });
+    res.setHeader('Content-Type', att.mime || 'application/octet-stream');
+    res.status(200).send(att.data);
+  } catch (e) {
+    console.error('Fetch attachment error', e);
     return res.status(500).json({ message: 'Server error' });
   }
 });
