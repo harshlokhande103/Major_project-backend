@@ -229,15 +229,29 @@ app.use('/api/chat', chatRouter)
 app.post('/api/users/:id/avatar', upload.single('avatar'), async (req, res) => {
   try {
     const { id } = req.params;
+
+    // Help callers who accidentally leave the placeholder ":id" in the URL
+    if (typeof id === 'string' && id.startsWith(':')) {
+      return res.status(400).json({
+        message: 'Invalid user id — replace ":id" with a real MongoDB ObjectId. Use GET /api/users to list users.'
+      });
+    }
+
+    // Validate ObjectId
+    if (!mongoose.Types.ObjectId.isValid(String(id))) {
+      return res.status(400).json({ message: 'Invalid user id' });
+    }
+
     const user = await User.findById(id);
     if (!user) return res.status(404).json({ message: 'User not found' });
 
-    // If multipart upload used, multer will populate req.file
+    // 1) Multipart upload handling (preferred)
     if (req.file && req.file.buffer) {
       user.profileImageData = req.file.buffer;
       user.profileImageContentType = req.file.mimetype || 'application/octet-stream';
       user.profileImage = `/api/users/${user._id}/avatar`;
       await user.save();
+
       return res.status(200).json({
         id: user._id,
         email: user.email,
@@ -247,13 +261,13 @@ app.post('/api/users/:id/avatar', upload.single('avatar'), async (req, res) => {
       });
     }
 
-    // Fallback: accept base64 JSON payload
-    // Example JSON body: { "base64": "<base64-data>", "contentType": "image/png", "fileName": "avatar.png" }
-    if (req.body && (req.body.base64 || req.body.dataUrl)) {
-      // support data URL like "data:image/png;base64,AAAA..."
+    // 2) JSON base64 fallback (optional if client cannot send multipart)
+    // Accept either { base64: "AAAA...", contentType: "image/png" } or dataUrl in dataUrl field
+    if (req.is('application/json') && (req.body && (req.body.base64 || req.body.dataUrl || req.body.file))) {
       let base64 = req.body.base64 || '';
       let contentType = req.body.contentType || 'application/octet-stream';
 
+      // Support data URL: "data:image/png;base64,AAA..."
       if (!base64 && req.body.dataUrl) {
         const m = String(req.body.dataUrl).match(/^data:([^;]+);base64,(.*)$/);
         if (m) {
@@ -262,8 +276,13 @@ app.post('/api/users/:id/avatar', upload.single('avatar'), async (req, res) => {
         }
       }
 
+      // Support "file" property that might directly contain base64
+      if (!base64 && req.body.file && typeof req.body.file === 'string') {
+        base64 = req.body.file;
+      }
+
       if (!base64) {
-        return res.status(400).json({ message: 'No file uploaded' });
+        return res.status(400).json({ message: 'No file uploaded. Provide multipart/form-data (key "avatar") or JSON { base64: "...", contentType: "image/png" }' });
       }
 
       const buffer = Buffer.from(base64, 'base64');
@@ -281,9 +300,10 @@ app.post('/api/users/:id/avatar', upload.single('avatar'), async (req, res) => {
       });
     }
 
-    return res.status(400).json({ message: 'No file uploaded' });
+    // Nothing usable found in request
+    return res.status(400).json({ message: 'No file uploaded. Use multipart/form-data (key "avatar") or JSON base64 payload.' });
   } catch (err) {
-    console.error(err);
+    console.error('Avatar upload error:', err);
     return res.status(500).json({ message: 'Server error' });
   }
 })
