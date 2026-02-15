@@ -346,13 +346,17 @@ app.get('/api/users', async (req, res) => {
 // Public: get user by id (without password)
 app.get('/api/user/:id', async (req, res) => {
   try {
-    const { id } = req.params
-    const user = await User.findById(id).select('-password').lean()
-    if (!user) return res.status(404).json({ message: 'User not found' })
-    return res.status(200).json(user)
+    const { id } = req.params;
+    // Validate ObjectId early and return a clear error
+    if (!mongoose.Types.ObjectId.isValid(String(id))) {
+      return res.status(400).json({ message: 'Invalid user id' });
+    }
+    const user = await User.findById(id).select('-password').lean();
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    return res.status(200).json(user);
   } catch (err) {
-    console.error(err)
-    return res.status(500).json({ message: 'Server error' })
+    console.error('GET /api/user/:id error', err);
+    return res.status(500).json({ message: 'Server error' });
   }
 })
 
