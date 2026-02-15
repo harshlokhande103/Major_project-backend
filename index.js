@@ -346,11 +346,20 @@ app.get('/api/users', async (req, res) => {
 // Public: get user by id (without password)
 app.get('/api/user/:id', async (req, res) => {
   try {
-    const { id } = req.params;
+    let { id } = req.params;
+
+    // Help users who accidentally call the literal placeholder "/api/user/:id"
+    if (typeof id === 'string' && id.startsWith(':')) {
+      return res.status(400).json({
+        message: 'Invalid user id — you used the placeholder ":id". Replace it with a real MongoDB ObjectId, e.g. /api/user/615c3f4a2f3e4a1b2c7d9f01. Use GET /api/users to list users and their ids.'
+      });
+    }
+
     // Validate ObjectId early and return a clear error
     if (!mongoose.Types.ObjectId.isValid(String(id))) {
       return res.status(400).json({ message: 'Invalid user id' });
     }
+
     const user = await User.findById(id).select('-password').lean();
     if (!user) return res.status(404).json({ message: 'User not found' });
     return res.status(200).json(user);
