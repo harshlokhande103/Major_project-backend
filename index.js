@@ -115,6 +115,11 @@ mongoose
 import mentorRouter from './routes/mentor.js';
 app.use('/api/mentors', mentorRouter);
 
+// Register pages router under /api/pages so requests like /api/pages/home work on Vercel
+app.use('/api/pages', pagesRouter);
+// (optional) keep old mount for direct server usage:
+// app.use('/pages', pagesRouter);
+
 // User Schema
 
 
