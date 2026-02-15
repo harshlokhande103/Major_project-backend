@@ -84,9 +84,12 @@ app.use(
 // Static files
 // Static files for uploads will be registered after multer setup so we can reuse the same uploadsDir
 
-// Lightweight health check for Postman
+// Add a flag to indicate DB connection state
+let mongoConnected = false;
+
+// Lightweight health check for Postman — now returns DB state too
 app.get('/api/health', (req, res) => {
-  res.status(200).json({ ok: true })
+  res.status(200).json({ ok: true, mongoConnected });
 })
 
 // Database connection
@@ -98,10 +101,14 @@ if (process.env.NODE_ENV === 'production' && !process.env.MONGODB_URI) {
 mongoose.set('strictQuery', true)
 mongoose
   .connect(mongoUri)
-  .then(() => console.log('MongoDB connected'))
+  .then(() => {
+    console.log('MongoDB connected');
+    mongoConnected = true;
+  })
   .catch(err => {
-    console.error('MongoDB connection error:', err)
-    process.exit(1)
+    // Log but DO NOT exit in serverless (Vercel) — exiting causes FUNCTION_INVOCATION_FAILED
+    console.error('MongoDB connection error:', err);
+    // process.exit(1) <-- removed so functions don't crash when DB is unreachable
   })
 
 // Register mentor routes
