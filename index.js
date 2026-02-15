@@ -228,29 +228,63 @@ app.use('/pages', pagesRouter)
 app.use('/api/chat', chatRouter)
 app.post('/api/users/:id/avatar', upload.single('avatar'), async (req, res) => {
   try {
-    const { id } = req.params
-    if (!req.file) {
-      return res.status(400).json({ message: 'No file uploaded' })
-    }
-    const user = await User.findById(id)
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' })
-    }
-    user.profileImageData = req.file.buffer
-    user.profileImageContentType = req.file.mimetype || 'application/octet-stream'
-    user.profileImage = `/api/users/${user._id}/avatar`
-    await user.save()
+    const { id } = req.params;
+    const user = await User.findById(id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
 
-    return res.status(200).json({
-      id: user._id,
-      email: user.email,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      profileImage: user.profileImage
-    })
+    // If multipart upload used, multer will populate req.file
+    if (req.file && req.file.buffer) {
+      user.profileImageData = req.file.buffer;
+      user.profileImageContentType = req.file.mimetype || 'application/octet-stream';
+      user.profileImage = `/api/users/${user._id}/avatar`;
+      await user.save();
+      return res.status(200).json({
+        id: user._id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        profileImage: user.profileImage
+      });
+    }
+
+    // Fallback: accept base64 JSON payload
+    // Example JSON body: { "base64": "<base64-data>", "contentType": "image/png", "fileName": "avatar.png" }
+    if (req.body && (req.body.base64 || req.body.dataUrl)) {
+      // support data URL like "data:image/png;base64,AAAA..."
+      let base64 = req.body.base64 || '';
+      let contentType = req.body.contentType || 'application/octet-stream';
+
+      if (!base64 && req.body.dataUrl) {
+        const m = String(req.body.dataUrl).match(/^data:([^;]+);base64,(.*)$/);
+        if (m) {
+          contentType = m[1];
+          base64 = m[2];
+        }
+      }
+
+      if (!base64) {
+        return res.status(400).json({ message: 'No file uploaded' });
+      }
+
+      const buffer = Buffer.from(base64, 'base64');
+      user.profileImageData = buffer;
+      user.profileImageContentType = contentType;
+      user.profileImage = `/api/users/${user._id}/avatar`;
+      await user.save();
+
+      return res.status(200).json({
+        id: user._id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        profileImage: user.profileImage
+      });
+    }
+
+    return res.status(400).json({ message: 'No file uploaded' });
   } catch (err) {
-    console.error(err)
-    return res.status(500).json({ message: 'Server error' })
+    console.error(err);
+    return res.status(500).json({ message: 'Server error' });
   }
 })
 
