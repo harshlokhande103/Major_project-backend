@@ -348,11 +348,11 @@ app.get('/api/user/:id', async (req, res) => {
   try {
     let { id } = req.params;
 
-    // Help users who accidentally call the literal placeholder "/api/user/:id"
+    // If caller used the literal placeholder like "/api/user/:id", redirect them
+    // to the users list so they can pick a real ObjectId. This prevents 400 responses
+    // when testing with the placeholder in tools like Postman.
     if (typeof id === 'string' && id.startsWith(':')) {
-      return res.status(400).json({
-        message: 'Invalid user id — you used the placeholder ":id". Replace it with a real MongoDB ObjectId, e.g. /api/user/615c3f4a2f3e4a1b2c7d9f01. Use GET /api/users to list users and their ids.'
-      });
+      return res.redirect(302, '/api/users');
     }
 
     // Validate ObjectId early and return a clear error
