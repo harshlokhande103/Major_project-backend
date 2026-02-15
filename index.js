@@ -230,19 +230,24 @@ app.post('/api/users/:id/avatar', upload.single('avatar'), async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Help callers who accidentally leave the placeholder ":id" in the URL
+    // If caller used the literal placeholder like ":id" try to resolve from session
+    let targetUserId = id;
     if (typeof id === 'string' && id.startsWith(':')) {
-      return res.status(400).json({
-        message: 'Invalid user id — replace ":id" with a real MongoDB ObjectId. Use GET /api/users to list users.'
-      });
+      if (req.session?.user?.id) {
+        targetUserId = String(req.session.user.id);
+      } else {
+        return res.status(400).json({
+          message: 'Invalid user id — replace ":id" with a real MongoDB ObjectId, or authenticate first so the server can use your session id.'
+        });
+      }
     }
 
     // Validate ObjectId
-    if (!mongoose.Types.ObjectId.isValid(String(id))) {
+    if (!mongoose.Types.ObjectId.isValid(String(targetUserId))) {
       return res.status(400).json({ message: 'Invalid user id' });
     }
 
-    const user = await User.findById(id);
+    const user = await User.findById(targetUserId);
     if (!user) return res.status(404).json({ message: 'User not found' });
 
     // 1) Multipart upload handling (preferred)
@@ -261,13 +266,10 @@ app.post('/api/users/:id/avatar', upload.single('avatar'), async (req, res) => {
       });
     }
 
-    // 2) JSON base64 fallback (optional if client cannot send multipart)
-    // Accept either { base64: "AAAA...", contentType: "image/png" } or dataUrl in dataUrl field
+    // 2) JSON base64 fallback
     if (req.is('application/json') && (req.body && (req.body.base64 || req.body.dataUrl || req.body.file))) {
       let base64 = req.body.base64 || '';
       let contentType = req.body.contentType || 'application/octet-stream';
-
-      // Support data URL: "data:image/png;base64,AAA..."
       if (!base64 && req.body.dataUrl) {
         const m = String(req.body.dataUrl).match(/^data:([^;]+);base64,(.*)$/);
         if (m) {
@@ -275,16 +277,12 @@ app.post('/api/users/:id/avatar', upload.single('avatar'), async (req, res) => {
           base64 = m[2];
         }
       }
-
-      // Support "file" property that might directly contain base64
       if (!base64 && req.body.file && typeof req.body.file === 'string') {
         base64 = req.body.file;
       }
-
       if (!base64) {
         return res.status(400).json({ message: 'No file uploaded. Provide multipart/form-data (key "avatar") or JSON { base64: "...", contentType: "image/png" }' });
       }
-
       const buffer = Buffer.from(base64, 'base64');
       user.profileImageData = buffer;
       user.profileImageContentType = contentType;
