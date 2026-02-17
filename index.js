@@ -33,6 +33,16 @@ app.use(helmet({
 app.use(express.json())
 app.use(cookieParser())
 
+// Add JSON parse error handler to return a clean 400 JSON instead of HTML stack trace
+app.use((err, req, res, next) => {
+	// body-parser / express.json sets err.type === 'entity.parse.failed' for malformed JSON
+	if (err && (err.type === 'entity.parse.failed' || err instanceof SyntaxError)) {
+		console.warn('Malformed JSON body:', err.message);
+		return res.status(400).json({ ok: false, message: 'Malformed JSON in request body' });
+	}
+	return next(err);
+});
+
 // Trust proxy when behind a reverse proxy (Render, Heroku, etc.) so secure cookies and client IPs work
 // Render sets env RENDER=true; we can also just always trust first proxy safely in this deployment
 app.set('trust proxy', 1)
