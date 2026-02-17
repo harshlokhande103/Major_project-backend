@@ -177,45 +177,104 @@ if (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && proce
 
 app.post('/api/register', authLimiter, upload.single('profileImage'), async (req, res) => {
   try {
-    const { firstName, lastName, email, password, bio, title, field, expertise } = req.body
-    
-    if (!firstName || !lastName || !email || !password) {
-      return res.status(400).json({ message: 'All fields are required' })
-    }
-
-    const existing = await User.findOne({ email })
-    if (existing) {
-      return res.status(409).json({ message: 'Email already registered' })
-    }
-
-    const hashedPassword = await bcrypt.hash(password, 10)
-    
-    // Create user first (so we have id for avatar URL)
-    const user = await User.create({
+    // Accept both JSON and form-data. Multer populated req.file when form-data is used.
+    // Extract fields; support a single "name" that will be split into first/last.
+    let {
       firstName,
-      lastName, 
+      lastName,
+      name,
       email,
-      password: hashedPassword,
+      password,
       bio,
       title,
       field,
-      expertise: expertise ? expertise.split(',').map(item => item.trim()) : [],
-      profileImage: ''
-    })
+      expertise
+    } = req.body || {};
 
-    // Handle profile image -> store in DB
-    if (req.file && req.file.buffer) {
-      user.profileImageData = req.file.buffer
-      user.profileImageContentType = req.file.mimetype || 'application/octet-stream'
-      // expose a stable URL for frontend
-      user.profileImage = `/api/users/${user._id}/avatar`
-      await user.save()
+    // If caller provided "name" (single field), split into first/last
+    if ((!firstName || !lastName) && name && typeof name === 'string') {
+      const parts = name.trim().split(/\s+/);
+      if (!firstName) firstName = parts.shift() || '';
+      if (!lastName) lastName = parts.join(' ') || lastName || '';
     }
 
-    return res.status(201).json(user)
+    // Normalize strings
+    firstName = firstName ? String(firstName).trim() : '';
+    lastName  = lastName ? String(lastName).trim() : '';
+    email     = email ? String(email).trim().toLowerCase() : '';
+    password  = password ? String(password) : '';
+
+    // Validate required fields and report which are missing
+    const required = { firstName, lastName, email, password };
+    const missing = Object.keys(required).filter(k => !required[k]);
+    if (missing.length > 0) {
+      return res.status(400).json({
+        message: 'Missing required fields',
+        missing
+      });
+    }
+
+    // Protect: basic email format check (optional)
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ message: 'Invalid email format' });
+    }
+
+    // Prevent duplicate registration
+    const existing = await User.findOne({ email });
+    if (existing) {
+      return res.status(409).json({ message: 'Email already registered' });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Ensure expertise is an array if provided as CSV string
+    let expertiseArr = [];
+    if (Array.isArray(expertise)) {
+      expertiseArr = expertise;
+    } else if (typeof expertise === 'string' && expertise.trim() !== '') {
+      expertiseArr = expertise.split(',').map(s => s.trim()).filter(Boolean);
+    }
+
+    // Create user record
+    const user = await User.create({
+      firstName,
+      lastName,
+      email,
+      password: hashedPassword,
+      bio: bio || '',
+      title: title || '',
+      field: field || '',
+      expertise: expertiseArr,
+      profileImage: ''
+    });
+
+    // If multipart upload provided a file, save it into DB and expose avatar URL
+    if (req.file && req.file.buffer) {
+      user.profileImageData = req.file.buffer;
+      user.profileImageContentType = req.file.mimetype || 'application/octet-stream';
+      user.profileImage = `/api/users/${user._id}/avatar`;
+      await user.save();
+    }
+
+    // Return created user (omit password)
+    const safe = {
+      id: user._id,
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      profileImage: user.profileImage,
+      bio: user.bio,
+      title: user.title,
+      field: user.field,
+      expertise: user.expertise,
+      role: user.role
+    };
+
+    return res.status(201).json(safe);
   } catch (err) {
-    console.error(err)
-    return res.status(500).json({ message: 'Server error' })
+    console.error('Register error:', err);
+    return res.status(500).json({ message: 'Server error' });
   }
 })
 
