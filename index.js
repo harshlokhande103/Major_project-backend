@@ -493,26 +493,55 @@ app.get('/api/user/:id', async (req, res) => {
 // Profile update
 app.put('/api/profile', requireAuth, async (req, res) => {
   try {
-    const { id, firstName, lastName, title, bio, expertise, field } = req.body
+    // prefer authenticated session id, fallback to body.id only if session not present
+    const sessionUserId = req.session?.user?.id;
+    const bodyId = req.body?.id;
+    const targetId = sessionUserId || bodyId;
 
-    const user = await User.findById(id)
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' })
+    if (!targetId) {
+      return res.status(401).json({ message: 'Unauthorized: no user id in session or request body' });
     }
 
-    user.firstName = firstName
-    user.lastName = lastName
-    user.title = title
-    user.bio = bio
-    user.field = field
-    user.expertise = expertise
+    // Validate ObjectId
+    if (!mongoose.Types.ObjectId.isValid(String(targetId))) {
+      return res.status(400).json({ message: 'Invalid user id' });
+    }
 
-    await user.save()
-    
-    return res.status(200).json(user)
+    const user = await User.findById(targetId);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Only update fields that are present in the request body
+    const { firstName, lastName, title, bio, expertise, field } = req.body || {};
+
+    let didUpdate = false;
+    if (typeof firstName !== 'undefined') { user.firstName = firstName; didUpdate = true; }
+    if (typeof lastName !== 'undefined')  { user.lastName  = lastName;  didUpdate = true; }
+    if (typeof title !== 'undefined')     { user.title     = title;     didUpdate = true; }
+    if (typeof bio !== 'undefined')       { user.bio       = bio;       didUpdate = true; }
+    if (typeof field !== 'undefined')     { user.field     = field;     didUpdate = true; }
+
+    if (typeof expertise !== 'undefined') {
+      if (Array.isArray(expertise)) {
+        user.expertise = expertise;
+      } else if (typeof expertise === 'string') {
+        user.expertise = expertise.split(',').map(s => s.trim()).filter(Boolean);
+      }
+      didUpdate = true;
+    }
+
+    if (!didUpdate) {
+      // Nothing to change; return current profile (or 400 if you prefer)
+      return res.status(200).json(user);
+    }
+
+    await user.save();
+    // Omit password automatically due to schema selection elsewhere; send updated user
+    return res.status(200).json(user);
   } catch (err) {
-    console.error(err)
-    return res.status(500).json({ message: 'Server error' })
+    console.error('Error updating profile:', err);
+    return res.status(500).json({ message: 'Server error' });
   }
 })
 
