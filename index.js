@@ -685,25 +685,51 @@ app.put('/admin/mentor-applications/:id/status', requireAuth, isAdmin, handleUpd
 app.put('/api/admin/mentor-applications/:id/status', requireAuth, isAdmin, handleUpdateMentorApplicationStatus);
 
 // Mentor - Create or update an application
-app.post('/api/mentor-applications', requireAuth, async (req, res) => {
+// Accept either an authenticated session OR credentials (email + password) in the request body.
+// If credentials are provided and valid, a session will be created for this request.
+app.post('/api/mentor-applications', async (req, res) => {
   try {
-    const userId = req.session.user.id;
-    const { phoneNumber, bio, domain, linkedin, portfolio } = req.body;
-    
+    // Resolve authenticated user id:
+    let userId = req.session?.user?.id;
+
+    // If no session, allow authentication via email+password in the body
+    if (!userId) {
+      const { email, password } = req.body || {};
+      if (email && password) {
+        const authUser = await User.findOne({ email });
+        if (!authUser) return res.status(401).json({ message: 'Invalid credentials' });
+        const ok = await bcrypt.compare(String(password), authUser.password);
+        if (!ok) return res.status(401).json({ message: 'Invalid credentials' });
+
+        // Create session for this client
+        req.session.user = {
+          id: authUser._id,
+          email: authUser.email,
+          role: authUser.role
+        };
+        userId = String(authUser._id);
+      } else {
+        return res.status(401).json({ message: 'Unauthorized' });
+      }
+    }
+
+    // At this point we have a resolved userId
+    const { phoneNumber, bio, domain, linkedin, portfolio } = req.body || {};
+
     // Get the authenticated user's information
-    const user = await User.findById(userId);
-    if (!user) {
+    const auth = await User.findById(userId);
+    if (!auth) {
       return res.status(404).json({ message: 'User not found' });
     }
-    
+
     // Use the user's first and last name from their profile
-    const fullName = `${user.firstName} ${user.lastName}`.trim();
+    const fullName = `${auth.firstName} ${auth.lastName}`.trim();
 
     // Upsert: create new or update existing application for this user
     const application = await MentorApplication.findOneAndUpdate(
       { userId },
       { 
-        name: fullName, // Use the name from user's profile, not from request
+        name: fullName, // Use the name from user's profile
         phoneNumber, 
         bio, 
         domain, 
