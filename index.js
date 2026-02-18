@@ -153,10 +153,46 @@ const userSchema = new mongoose.Schema({
 const User = mongoose.model('User', userSchema)
 
 // Auth middleware
-const requireAuth = (req, res, next) => {
-  if (req.session?.user) return next()
-  return res.status(401).json({ message: 'Unauthorized' })
-}
+// Accepts existing session OR Basic Auth header OR email+password in JSON body (for testing via Postman)
+const requireAuth = async (req, res, next) => {
+  try {
+    if (req.session?.user) return next();
+
+    // Try Basic Authorization header: "Basic base64(email:password)"
+    let email, password;
+    const authHeader = req.headers?.authorization || '';
+    if (authHeader.startsWith('Basic ')) {
+      const token = authHeader.slice(6);
+      const decoded = Buffer.from(token, 'base64').toString('utf8');
+      const sep = decoded.indexOf(':');
+      if (sep !== -1) {
+        email = decoded.slice(0, sep);
+        password = decoded.slice(sep + 1);
+      } else {
+        email = decoded;
+      }
+    }
+
+    // Fallback: allow credentials in JSON body (useful when client sends body with GET in Postman)
+    if ((!email || !password) && req.body && req.body.email && req.body.password) {
+      email = req.body.email;
+      password = req.body.password;
+    }
+
+    if (email && password) {
+      const user = await User.findOne({ email });
+      if (user && await bcrypt.compare(String(password), user.password)) {
+        // create session for subsequent requests (if cookies are supported)
+        req.session.user = { id: user._id, email: user.email, role: user.role };
+        return next();
+      }
+    }
+  } catch (err) {
+    console.error('requireAuth fallback error:', err);
+  }
+
+  return res.status(401).json({ message: 'Unauthorized' });
+};
 
 const requireAdmin = (req, res, next) => {
   if (req.session?.user?.role === 'admin') return next()
