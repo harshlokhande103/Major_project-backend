@@ -30,14 +30,44 @@ app.use(
   })
 )
 
-app.use(express.json())
+// Replace simple express.json() with a version that captures the raw body for debugging
+app.use(express.json({
+  limit: '1mb',
+  verify: (req, res, buf) => {
+    try {
+      req.rawBody = buf.toString('utf8');
+    } catch (e) {
+      req.rawBody = '';
+    }
+  }
+}))
+
+// Also accept urlencoded bodies and capture raw body (useful if client mis-sets Content-Type)
+app.use(express.urlencoded({
+  extended: true,
+  limit: '1mb',
+  verify: (req, res, buf) => {
+    try {
+      req.rawBody = buf.toString('utf8');
+    } catch (e) {
+      req.rawBody = '';
+    }
+  }
+}))
+
 app.use(cookieParser())
 
-// JSON parse error handler
+// Improved JSON parse error handler that logs a truncated raw body and gives a clearer hint
 app.use((err, req, res, next) => {
   if (err && (err.type === 'entity.parse.failed' || err instanceof SyntaxError)) {
+    const raw = String(req.rawBody || '').slice(0, 200) // truncate for logs
     console.warn('Malformed JSON body:', err.message)
-    return res.status(400).json({ ok: false, message: 'Malformed JSON in request body' })
+    if (raw) console.warn('Raw request start:', raw.replace(/\r?\n/g, '\\n'))
+    return res.status(400).json({
+      ok: false,
+      message: 'Malformed JSON in request body. Ensure Content-Type: application/json and valid JSON payload.',
+      hint: 'If using Postman: Body → raw → JSON (application/json). Remove any stray characters or trailing commas.'
+    })
   }
   return next(err)
 })
