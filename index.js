@@ -713,6 +713,21 @@ app.get('/api/slots', requireAuth, async (req, res) => {
 
 app.post('/api/slots', requireAuth, async (req, res) => {
   try {
+    // Helpful guard: detect when caller sent admin/mentor-application payload by mistake
+    // (e.g. status/email/password) instead of slot data (expects "start").
+    const body = req.body || {};
+    const looksLikeAdminAction = typeof body.status !== 'undefined' || (body.email && body.password);
+    const hasStart = typeof body.start !== 'undefined';
+
+    if (looksLikeAdminAction && !hasStart) {
+      return res.status(400).json({
+        message: 'Your request looks like an admin/mentor-application request, not a slot creation.',
+        hint: 'To update mentor application status: PUT /api/admin/mentor-applications/:id/status (body: { "status":"approved" }).\n' +
+              'To create a mentor application: POST /api/mentor-applications (include phoneNumber/bio etc.).\n' +
+              'To create a slot (this endpoint) send JSON with "start" (ISO datetime) and optional "durationMinutes"/"end"/"price".'
+      });
+    }
+
     const userId = req.session.user.id
     const { start, end, durationMinutes, price, label } = req.body
     if (!start) return res.status(400).json({ message: 'start datetime is required' })
