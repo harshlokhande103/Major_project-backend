@@ -750,32 +750,48 @@ app.post('/api/slots', requireAuth, async (req, res) => {
 
 app.put('/api/slots/:id', requireAuth, async (req, res) => {
   try {
-    const userId = req.session.user.id
-    const { id } = req.params
-    const { start, end, durationMinutes, price, label } = req.body
-    const slot = await Slot.findById(id)
-    if (!slot) return res.status(404).json({ message: 'Slot not found' })
-    if (String(slot.mentorId) !== String(userId)) return res.status(403).json({ message: 'Forbidden' })
+    // Helpful guard: detect when caller sends admin/mentor-application payload by mistake
+    // (e.g. status/email/password) instead of slot update data (expects "start" or slot fields).
+    const body = req.body || {};
+    const looksLikeAdminAction = typeof body.status !== 'undefined' || (body.email && body.password);
+    const hasSlotFields = typeof body.start !== 'undefined' || typeof body.end !== 'undefined' || typeof body.durationMinutes !== 'undefined' || typeof body.price !== 'undefined' || typeof body.label !== 'undefined';
+
+    if (looksLikeAdminAction && !hasSlotFields) {
+      return res.status(400).json({
+        message: 'Request payload does not look like a slot update.',
+        hint: 'To update mentor application status use: PUT /api/admin/mentor-applications/:id/status with body { "status":"approved" } (or login first). To update a slot send fields like "start","end","durationMinutes","price".'
+      });
+    }
+
+    const userId = req.session.user.id;
+    const { id } = req.params;
+    const { start, end, durationMinutes, price, label } = req.body;
+
+    const slot = await Slot.findById(id);
+    if (!slot) return res.status(404).json({ message: 'Slot not found' });
+    if (String(slot.mentorId) !== String(userId)) return res.status(403).json({ message: 'Forbidden' });
+
     if (start) {
-      const s = new Date(start)
-      if (isNaN(s)) return res.status(400).json({ message: 'Invalid start datetime' })
-      slot.start = s
+      const s = new Date(start);
+      if (isNaN(s)) return res.status(400).json({ message: 'Invalid start datetime' });
+      slot.start = s;
     }
     if (end) {
-      const e = new Date(end)
-      if (isNaN(e)) return res.status(400).json({ message: 'Invalid end datetime' })
-      slot.end = e
+      const e = new Date(end);
+      if (isNaN(e)) return res.status(400).json({ message: 'Invalid end datetime' });
+      slot.end = e;
     } else if (durationMinutes) {
-      slot.durationMinutes = Number(durationMinutes)
-      slot.end = new Date(new Date(slot.start).getTime() + Number(durationMinutes) * 60000)
+      slot.durationMinutes = Number(durationMinutes);
+      slot.end = new Date(new Date(slot.start).getTime() + Number(durationMinutes) * 60000);
     }
-    if (price !== undefined) slot.price = Number(price)
-    if (label !== undefined) slot.label = label
-    await slot.save()
-    res.status(200).json(slot)
+    if (price !== undefined) slot.price = Number(price);
+    if (label !== undefined) slot.label = label;
+
+    await slot.save();
+    return res.status(200).json(slot);
   } catch (err) {
-    console.error('Error updating slot:', err)
-    res.status(500).json({ message: 'Server error' })
+    console.error('Error updating slot:', err);
+    return res.status(500).json({ message: 'Server error' });
   }
 })
 
