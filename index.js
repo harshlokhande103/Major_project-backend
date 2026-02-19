@@ -883,11 +883,21 @@ app.post('/api/logout', (req, res) => {
   })
 })
 
-const PORT = process.env.PORT || 3000
+const BASE_PORT = Number(process.env.PORT) || 3000
 if (!process.env.VERCEL) {
-  app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`)
-  })
+  const tryListen = (p) => {
+    const server = app.listen(p, () => {
+      console.log(`Server running on port ${p}`)
+    })
+    server.on('error', err => {
+      if (err && err.code === 'EADDRINUSE') {
+        tryListen(p + 1)
+      } else {
+        throw err
+      }
+    })
+  }
+  tryListen(BASE_PORT)
 }
 
 export default app
