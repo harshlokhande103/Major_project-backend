@@ -138,6 +138,7 @@ mongoose
 // Register routers
 app.use('/api/mentors', mentorRouter)
 app.use('/api/pages', pagesRouter)
+app.use('/pages', pagesRouter)
 app.use('/api/chat', chatRouter)
 
 // User model
