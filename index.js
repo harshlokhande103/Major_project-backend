@@ -239,6 +239,31 @@ const requireAdmin = async (req, res, next) => {
   return res.status(403).json({ message: 'Access denied. Admin privileges required.' })
 }
 
+// Mentor middleware: only verified/approved mentors can perform mentor actions.
+const requireVerifiedMentor = async (req, res, next) => {
+  try {
+    const sessionUser = req.session?.user
+    if (!sessionUser?.id) return res.status(401).json({ message: 'Unauthorized' })
+    if (sessionUser.role === 'admin') return next()
+
+    const user = await User.findById(sessionUser.id).select('role')
+    if (!user) return res.status(401).json({ message: 'Unauthorized' })
+
+    const application = await MentorApplication.findOne({ userId: sessionUser.id }).select('status')
+    const isApprovedMentor = String(user.role) === 'mentor' && String(application?.status) === 'approved'
+
+    if (!isApprovedMentor) {
+      return res.status(403).json({
+        message: 'Mentor profile verification required before accessing mentor features.'
+      })
+    }
+    return next()
+  } catch (err) {
+    console.error('requireVerifiedMentor error:', err)
+    return res.status(500).json({ message: 'Server error' })
+  }
+}
+
 // Multer memory storage
 const storage = multer.memoryStorage()
 const upload = multer({ storage })
@@ -798,7 +823,7 @@ app.get('/admin/sessions', requireAuth, requireAdmin, handleGetAdminSessions)
 app.get('/api/admin/sessions', requireAuth, requireAdmin, handleGetAdminSessions)
 
 // Slots API
-app.get('/api/slots', requireAuth, async (req, res) => {
+app.get('/api/slots', requireAuth, requireVerifiedMentor, async (req, res) => {
   try {
     const userId = req.session.user.id
     const slots = await Slot.find({ mentorId: userId }).sort({ start: 1 })
@@ -809,7 +834,7 @@ app.get('/api/slots', requireAuth, async (req, res) => {
   }
 })
 
-app.post('/api/slots', requireAuth, async (req, res) => {
+app.post('/api/slots', requireAuth, requireVerifiedMentor, async (req, res) => {
   try {
     // Helpful guard: detect when caller sent admin/mentor-application payload by mistake
     // (e.g. status/email/password) instead of slot data (expects "start").
@@ -846,7 +871,7 @@ app.post('/api/slots', requireAuth, async (req, res) => {
   }
 })
 
-app.put('/api/slots/:id', requireAuth, async (req, res) => {
+app.put('/api/slots/:id', requireAuth, requireVerifiedMentor, async (req, res) => {
   try {
     // Helpful guard: detect when caller sends admin/mentor-application payload by mistake
     // (e.g. status/email/password) instead of slot update data (expects "start" or slot fields).
@@ -893,7 +918,7 @@ app.put('/api/slots/:id', requireAuth, async (req, res) => {
   }
 })
 
-app.delete('/api/slots/:id', requireAuth, async (req, res) => {
+app.delete('/api/slots/:id', requireAuth, requireVerifiedMentor, async (req, res) => {
   try {
     const userId = req.session.user.id
     const { id } = req.params
@@ -939,7 +964,7 @@ app.get('/api/bookings', requireAuth, async (req, res) => {
   }
 })
 
-app.get('/api/mentor/bookings', requireAuth, async (req, res) => {
+app.get('/api/mentor/bookings', requireAuth, requireVerifiedMentor, async (req, res) => {
   try {
     const mentorId = req.session.user.id
     const bookings = await Booking.find({ mentorId }).populate('userId', 'firstName lastName email profileImage').populate('slotId').sort({ createdAt: -1 })
