@@ -1000,6 +1000,10 @@ app.put('/api/bookings/:id', requireAuth, async (req, res) => {
     if (!booking) return res.status(404).json({ message: 'Booking not found' })
     if (String(booking.mentorId) !== String(userId) && String(booking.userId) !== String(userId)) return res.status(403).json({ message: 'Forbidden' })
     const prevStatus = booking.status
+    if (status === 'completed' && String(booking.mentorId) !== String(userId)) {
+      return res.status(403).json({ message: 'Only mentor can mark session as completed' })
+    }
+
     if (status) booking.status = status
     if (meetingLink !== undefined) booking.meetingLink = meetingLink
     await booking.save()
@@ -1023,6 +1027,21 @@ app.put('/api/bookings/:id', requireAuth, async (req, res) => {
         userId: booking.userId,
         title: 'Session Cancelled by Mentor',
         message: `Your mentor has cancelled the session scheduled for ${timeText}. Please book another slot.`,
+        type: 'general',
+        data: { bookingId: String(booking._id) }
+      })
+    }
+
+    const mentorMarkedCompleted =
+      status === 'completed' &&
+      prevStatus !== 'completed' &&
+      String(booking.mentorId) === String(userId)
+
+    if (mentorMarkedCompleted) {
+      await Notification.create({
+        userId: booking.userId,
+        title: 'Session Marked Completed',
+        message: 'Your mentor marked the session as completed.',
         type: 'general',
         data: { bookingId: String(booking._id) }
       })
