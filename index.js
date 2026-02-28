@@ -942,7 +942,23 @@ app.post('/api/bookings', requireAuth, async (req, res) => {
     const slot = await Slot.findById(slotId)
     if (!slot) return res.status(404).json({ message: 'Slot not found' })
     const existingBooking = await Booking.findOne({ slotId })
-    if (existingBooking) return res.status(409).json({ message: 'Slot already booked' })
+    if (existingBooking) {
+      // Allow re-booking if previous booking on this slot was cancelled.
+      if (existingBooking.status === 'cancelled') {
+        existingBooking.userId = userId
+        existingBooking.mentorId = slot.mentorId
+        existingBooking.notes = notes || ''
+        existingBooking.status = 'confirmed'
+        existingBooking.meetingLink = ''
+        await existingBooking.save()
+        const repopulated = await Booking.findById(existingBooking._id)
+          .populate('userId', 'firstName lastName email')
+          .populate('mentorId', 'firstName lastName email')
+          .populate('slotId')
+        return res.status(200).json(repopulated)
+      }
+      return res.status(409).json({ message: 'Slot already booked' })
+    }
     if (String(slot.mentorId) === String(userId)) return res.status(400).json({ message: 'Cannot book your own slot' })
     const booking = await Booking.create({ userId, slotId, mentorId: slot.mentorId, notes: notes || '', status: 'confirmed' })
     const populatedBooking = await Booking.findById(booking._id).populate('userId', 'firstName lastName email').populate('mentorId', 'firstName lastName email').populate('slotId')
@@ -983,9 +999,35 @@ app.put('/api/bookings/:id', requireAuth, async (req, res) => {
     const booking = await Booking.findById(id)
     if (!booking) return res.status(404).json({ message: 'Booking not found' })
     if (String(booking.mentorId) !== String(userId) && String(booking.userId) !== String(userId)) return res.status(403).json({ message: 'Forbidden' })
+    const prevStatus = booking.status
     if (status) booking.status = status
     if (meetingLink !== undefined) booking.meetingLink = meetingLink
     await booking.save()
+
+    // If mentor cancels a booked session, notify the mentee.
+    const mentorCancelled =
+      status === 'cancelled' &&
+      prevStatus !== 'cancelled' &&
+      String(booking.mentorId) === String(userId)
+
+    if (mentorCancelled) {
+      let timeText = 'the scheduled time'
+      try {
+        const slot = await Slot.findById(booking.slotId).select('start')
+        if (slot?.start) timeText = new Date(slot.start).toLocaleString()
+      } catch (e) {
+        console.error('Slot lookup for cancel notification failed:', e)
+      }
+
+      await Notification.create({
+        userId: booking.userId,
+        title: 'Session Cancelled by Mentor',
+        message: `Your mentor has cancelled the session scheduled for ${timeText}. Please book another slot.`,
+        type: 'general',
+        data: { bookingId: String(booking._id) }
+      })
+    }
+
     const populatedBooking = await Booking.findById(booking._id).populate('userId', 'firstName lastName email').populate('mentorId', 'firstName lastName email').populate('slotId')
     res.status(200).json(populatedBooking)
   } catch (err) {
