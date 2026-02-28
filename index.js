@@ -700,6 +700,103 @@ const handleDeleteUser = async (req, res) => {
 app.delete('/admin/users/:id', requireAuth, requireAdmin, handleDeleteUser)
 app.delete('/api/admin/users/:id', requireAuth, requireAdmin, handleDeleteUser)
 
+// Admin - sessions overview (mentor availability + booked sessions)
+const handleGetAdminSessions = async (req, res) => {
+  try {
+    const now = new Date()
+
+    const slots = await Slot.find({})
+      .populate('mentorId', 'firstName lastName email')
+      .sort({ start: -1 })
+      .lean()
+
+    const slotIds = slots.map(s => s._id).filter(Boolean)
+    const bookings = slotIds.length
+      ? await Booking.find({ slotId: { $in: slotIds } })
+          .populate('userId', 'firstName lastName email')
+          .populate('mentorId', 'firstName lastName email')
+          .lean()
+      : []
+
+    const bookingBySlotId = new Map()
+    for (const b of bookings) bookingBySlotId.set(String(b.slotId), b)
+
+    const sessions = slots.map(slot => {
+      const booking = bookingBySlotId.get(String(slot._id)) || null
+      const start = slot?.start ? new Date(slot.start) : null
+      const end = slot?.end
+        ? new Date(slot.end)
+        : (slot?.durationMinutes && start ? new Date(start.getTime() + Number(slot.durationMinutes) * 60000) : null)
+
+      const endedByTime = end ? end < now : (start ? start < now : false)
+      const bookingStatus = booking?.status || 'available'
+
+      let sessionState = 'available'
+      if (booking) {
+        if (bookingStatus === 'cancelled') sessionState = 'cancelled'
+        else if (bookingStatus === 'completed' || endedByTime) sessionState = 'completed'
+        else sessionState = 'upcoming'
+      }
+
+      const mentorObj = slot.mentorId && typeof slot.mentorId === 'object' ? slot.mentorId : {}
+      const menteeObj = booking?.userId && typeof booking.userId === 'object' ? booking.userId : {}
+
+      return {
+        id: String(slot._id),
+        slotId: String(slot._id),
+        bookingId: booking ? String(booking._id) : null,
+        mentor: {
+          id: mentorObj?._id ? String(mentorObj._id) : (slot.mentorId ? String(slot.mentorId) : ''),
+          name: `${mentorObj?.firstName || ''} ${mentorObj?.lastName || ''}`.trim() || 'Unknown mentor',
+          email: mentorObj?.email || ''
+        },
+        mentee: booking ? {
+          id: menteeObj?._id ? String(menteeObj._id) : (booking.userId ? String(booking.userId) : ''),
+          name: `${menteeObj?.firstName || ''} ${menteeObj?.lastName || ''}`.trim() || 'Unknown mentee',
+          email: menteeObj?.email || ''
+        } : null,
+        start,
+        end,
+        date: start ? start.toISOString() : null,
+        durationMinutes: slot?.durationMinutes || (start && end ? Math.max(1, Math.round((end - start) / 60000)) : null),
+        price: Number(slot?.price || 0),
+        label: slot?.label || '',
+        isBooked: !!booking,
+        bookingStatus,
+        sessionState,
+        sessionEnded: booking ? (sessionState === 'completed') : false,
+        notes: booking?.notes || ''
+      }
+    })
+
+    const grouped = {
+      upcoming: sessions.filter(s => s.sessionState === 'upcoming'),
+      completed: sessions.filter(s => s.sessionState === 'completed'),
+      cancelled: sessions.filter(s => s.sessionState === 'cancelled'),
+      available: sessions.filter(s => s.sessionState === 'available')
+    }
+
+    return res.status(200).json({
+      sessions,
+      ...grouped,
+      counts: {
+        total: sessions.length,
+        booked: sessions.filter(s => s.isBooked).length,
+        available: grouped.available.length,
+        upcoming: grouped.upcoming.length,
+        completed: grouped.completed.length,
+        cancelled: grouped.cancelled.length
+      }
+    })
+  } catch (error) {
+    console.error('Error fetching admin sessions:', error)
+    return res.status(500).json({ message: 'Server error' })
+  }
+}
+
+app.get('/admin/sessions', requireAuth, requireAdmin, handleGetAdminSessions)
+app.get('/api/admin/sessions', requireAuth, requireAdmin, handleGetAdminSessions)
+
 // Slots API
 app.get('/api/slots', requireAuth, async (req, res) => {
   try {
