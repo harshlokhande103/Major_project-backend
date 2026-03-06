@@ -1,6 +1,7 @@
 import express from 'express';
 import MentorApplication from '../models/MentorApplication.js';
 import Slot from '../models/Slot.js';
+import Booking from '../models/Booking.js';
 import mongoose from 'mongoose';
 
 const router = express.Router();
@@ -11,6 +12,37 @@ router.get('/', async (req, res) => {
     const mentors = await MentorApplication.find({ status: 'approved' })
       .populate('userId', 'firstName lastName email profileImage bio title field expertise')
       .lean();
+
+    const mentorUserIds = mentors
+      .map(m => m?.userId?._id)
+      .filter(Boolean)
+      .map(id => new mongoose.Types.ObjectId(String(id)));
+
+    const ratingRows = mentorUserIds.length
+      ? await Booking.aggregate([
+          {
+            $match: {
+              mentorId: { $in: mentorUserIds },
+              status: 'completed',
+              ratingValue: { $gte: 1, $lte: 5 }
+            }
+          },
+          {
+            $group: {
+              _id: '$mentorId',
+              avgRating: { $avg: '$ratingValue' },
+              reviews: { $sum: 1 }
+            }
+          }
+        ])
+      : [];
+
+    const ratingMap = new Map(
+      ratingRows.map(r => [
+        String(r._id),
+        { rating: Number((r.avgRating || 0).toFixed(1)), reviews: Number(r.reviews || 0) }
+      ])
+    );
     
     // Transform the data to include user information
     const mentorsWithUserData = mentors.map(mentor => ({
@@ -27,7 +59,9 @@ router.get('/', async (req, res) => {
       linkedin: mentor.linkedin,
       portfolio: mentor.portfolio,
       status: mentor.status,
-      applicationDate: mentor.applicationDate
+      applicationDate: mentor.applicationDate,
+      rating: ratingMap.get(String(mentor.userId?._id))?.rating || 0,
+      reviews: ratingMap.get(String(mentor.userId?._id))?.reviews || 0
     }));
     
     res.status(200).json(mentorsWithUserData);

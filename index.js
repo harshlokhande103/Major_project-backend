@@ -950,6 +950,9 @@ app.post('/api/bookings', requireAuth, async (req, res) => {
         existingBooking.notes = notes || ''
         existingBooking.status = 'confirmed'
         existingBooking.meetingLink = ''
+        existingBooking.ratingValue = null
+        existingBooking.ratingComment = ''
+        existingBooking.ratedAt = null
         await existingBooking.save()
         const repopulated = await Booking.findById(existingBooking._id)
           .populate('userId', 'firstName lastName email')
@@ -995,7 +998,7 @@ app.put('/api/bookings/:id', requireAuth, async (req, res) => {
   try {
     const userId = req.session.user.id
     const { id } = req.params
-    const { status, meetingLink } = req.body
+    const { status, meetingLink, ratingValue, ratingComment } = req.body
     const booking = await Booking.findById(id)
     if (!booking) return res.status(404).json({ message: 'Booking not found' })
     if (String(booking.mentorId) !== String(userId) && String(booking.userId) !== String(userId)) return res.status(403).json({ message: 'Forbidden' })
@@ -1006,6 +1009,25 @@ app.put('/api/bookings/:id', requireAuth, async (req, res) => {
 
     if (status) booking.status = status
     if (meetingLink !== undefined) booking.meetingLink = meetingLink
+
+    const wantsToRate = ratingValue !== undefined || ratingComment !== undefined
+    if (wantsToRate) {
+      if (String(booking.userId) !== String(userId)) {
+        return res.status(403).json({ message: 'Only mentee can submit rating' })
+      }
+      if (booking.status !== 'completed' && status !== 'completed') {
+        return res.status(400).json({ message: 'Rating allowed only after session is completed' })
+      }
+
+      const ratingNumber = Number(ratingValue)
+      if (!Number.isInteger(ratingNumber) || ratingNumber < 1 || ratingNumber > 5) {
+        return res.status(400).json({ message: 'ratingValue must be an integer between 1 and 5' })
+      }
+
+      booking.ratingValue = ratingNumber
+      booking.ratingComment = String(ratingComment || '').trim().slice(0, 500)
+      booking.ratedAt = new Date()
+    }
     await booking.save()
 
     // If mentor cancels a booked session, notify the mentee.
@@ -1047,6 +1069,16 @@ app.put('/api/bookings/:id', requireAuth, async (req, res) => {
       })
     }
 
+    if (wantsToRate) {
+      await Notification.create({
+        userId: booking.mentorId,
+        title: 'New Session Rating',
+        message: `You received a ${booking.ratingValue}/5 rating from your mentee.`,
+        type: 'general',
+        data: { bookingId: String(booking._id), ratingValue: booking.ratingValue }
+      })
+    }
+
     const populatedBooking = await Booking.findById(booking._id).populate('userId', 'firstName lastName email').populate('mentorId', 'firstName lastName email').populate('slotId')
     res.status(200).json(populatedBooking)
   } catch (err) {
@@ -1054,6 +1086,58 @@ app.put('/api/bookings/:id', requireAuth, async (req, res) => {
     res.status(500).json({ message: 'Server error' })
   }
 })
+
+// Admin - feedback & ratings
+const handleGetFeedbacks = async (req, res) => {
+  try {
+    const ratedBookings = await Booking.find({ ratingValue: { $gte: 1, $lte: 5 } })
+      .populate('userId', 'firstName lastName email')
+      .populate('mentorId', 'firstName lastName email')
+      .populate('slotId', 'start label')
+      .sort({ ratedAt: -1, updatedAt: -1 })
+      .lean()
+
+    const items = ratedBookings.map((b) => ({
+      id: String(b._id),
+      bookingId: String(b._id),
+      rating: b.ratingValue,
+      comment: b.ratingComment || '',
+      ratedAt: b.ratedAt || b.updatedAt,
+      userEmail: b.userId?.email || '',
+      userName: `${b.userId?.firstName || ''} ${b.userId?.lastName || ''}`.trim(),
+      mentorEmail: b.mentorId?.email || '',
+      mentorName: `${b.mentorId?.firstName || ''} ${b.mentorId?.lastName || ''}`.trim(),
+      sessionDate: b.slotId?.start || null,
+      sessionLabel: b.slotId?.label || ''
+    }))
+
+    res.status(200).json(items)
+  } catch (error) {
+    console.error('Error fetching feedbacks:', error)
+    res.status(500).json({ message: 'Server error' })
+  }
+}
+
+const handleDeleteFeedback = async (req, res) => {
+  try {
+    const { id } = req.params
+    const booking = await Booking.findById(id)
+    if (!booking) return res.status(404).json({ message: 'Feedback not found' })
+    booking.ratingValue = null
+    booking.ratingComment = ''
+    booking.ratedAt = null
+    await booking.save()
+    res.status(200).json({ message: 'Feedback removed' })
+  } catch (error) {
+    console.error('Error deleting feedback:', error)
+    res.status(500).json({ message: 'Server error' })
+  }
+}
+
+app.get('/admin/feedbacks', requireAuth, requireAdmin, handleGetFeedbacks)
+app.get('/api/admin/feedbacks', requireAuth, requireAdmin, handleGetFeedbacks)
+app.delete('/admin/feedbacks/:id', requireAuth, requireAdmin, handleDeleteFeedback)
+app.delete('/api/admin/feedbacks/:id', requireAuth, requireAdmin, handleDeleteFeedback)
 
 // Logout
 app.post('/api/logout', (req, res) => {

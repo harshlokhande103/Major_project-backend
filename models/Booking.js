@@ -28,6 +28,20 @@ const bookingSchema = new mongoose.Schema({
   meetingLink: {
     type: String,
     default: ''
+  },
+  ratingValue: {
+    type: Number,
+    min: 1,
+    max: 5,
+    default: null
+  },
+  ratingComment: {
+    type: String,
+    default: ''
+  },
+  ratedAt: {
+    type: Date,
+    default: null
   }
 }, { timestamps: true });
 
