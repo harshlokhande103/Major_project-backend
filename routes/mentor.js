@@ -82,10 +82,21 @@ router.get('/:id/slots', async (req, res) => {
       return res.status(404).json({ error: 'Mentor not found or not approved' });
     }
 
-    // Fetch slots for the mentor
+    // Fetch all slots for this mentor first
     const slots = await Slot.find({ mentorId: mentor.userId }).sort({ start: 1 });
+    if (!slots.length) return res.status(200).json([]);
 
-    res.status(200).json(slots);
+    // Hide slots that are already booked (except cancelled bookings, which can be rebooked)
+    const slotIds = slots.map((s) => s._id);
+    const booked = await Booking.find({
+      slotId: { $in: slotIds },
+      status: { $ne: 'cancelled' }
+    }).select('slotId').lean();
+
+    const bookedSlotSet = new Set(booked.map((b) => String(b.slotId)));
+    const availableSlots = slots.filter((s) => !bookedSlotSet.has(String(s._id)));
+
+    res.status(200).json(availableSlots);
   } catch (err) {
     console.error('Error fetching mentor slots:', err);
     res.status(500).json({ error: 'Failed to fetch mentor slots' });
