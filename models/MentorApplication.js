@@ -13,6 +13,10 @@ const mentorApplicationSchema = new mongoose.Schema({
   domain: { type: String, trim: true, default: '' },
   linkedin: { type: String, trim: true, default: '' },
   portfolio: { type: String, trim: true, default: '' },
+  domainCertificateName: { type: String, trim: true, default: '' },
+  domainCertificateContentType: { type: String, trim: true, default: '' },
+  domainCertificateData: { type: Buffer },
+  domainCertificateUrl: { type: String, trim: true, default: '' },
   status: {
     type: String,
     enum: ['pending', 'approved', 'rejected'],

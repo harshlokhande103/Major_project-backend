@@ -269,6 +269,17 @@ const requireVerifiedMentor = async (req, res, next) => {
 // Multer memory storage
 const storage = multer.memoryStorage()
 const upload = multer({ storage })
+const mentorCertificateUpload = multer({
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowed = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
+    if (!allowed.includes(String(file.mimetype || '').toLowerCase())) {
+      return cb(new Error('Only PDF, JPG, PNG, or WEBP certificates are allowed'));
+    }
+    cb(null, true);
+  }
+})
 
 const authLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -526,7 +537,9 @@ const handleGetMentorApplications = async (req, res) => {
     const { status } = req.query
     let filter = {}
     if (status && ['pending', 'approved', 'rejected'].includes(status)) filter.status = status
-    const applications = await MentorApplication.find(filter).populate('userId', 'firstName lastName email')
+    const applications = await MentorApplication.find(filter)
+      .select('-domainCertificateData')
+      .populate('userId', 'firstName lastName email')
     res.status(200).json(applications)
   } catch (error) {
     console.error('Error fetching mentor applications:', error)
@@ -601,7 +614,17 @@ app.put('/admin/mentor-applications/:id/status', requireAuth, requireAdmin, hand
 app.put('/api/admin/mentor-applications/:id/status', requireAuth, requireAdmin, handleUpdateMentorApplicationStatus)
 
 // Mentor application (create/update)
-app.post('/api/mentor-applications', async (req, res) => {
+app.post('/api/mentor-applications', (req, res, next) => {
+  mentorCertificateUpload.single('domainCertificate')(req, res, (err) => {
+    if (err instanceof multer.MulterError) {
+      return res.status(400).json({ message: err.message || 'Certificate upload failed' })
+    }
+    if (err) {
+      return res.status(400).json({ message: err.message || 'Certificate upload failed' })
+    }
+    return next()
+  })
+}, async (req, res) => {
   try {
     let userId = req.session?.user?.id
     if (!userId) {
@@ -621,14 +644,72 @@ app.post('/api/mentor-applications', async (req, res) => {
     const auth = await User.findById(userId)
     if (!auth) return res.status(404).json({ message: 'User not found' })
     const fullName = `${auth.firstName} ${auth.lastName}`.trim()
+    const existingApplication = await MentorApplication.findOne({ userId })
+    const update = {
+      name: fullName,
+      phoneNumber,
+      bio,
+      domain,
+      linkedin,
+      portfolio,
+      applicationDate: new Date(),
+      status: 'pending'
+    }
+
+    if (req.file?.buffer) {
+      update.domainCertificateName = req.file.originalname || 'domain-certificate'
+      update.domainCertificateContentType = req.file.mimetype || 'application/octet-stream'
+      update.domainCertificateData = req.file.buffer
+    } else if (!existingApplication?.domainCertificateData) {
+      return res.status(400).json({ message: 'Domain certificate is required' })
+    }
+
     const application = await MentorApplication.findOneAndUpdate(
       { userId },
-      { name: fullName, phoneNumber, bio, domain, linkedin, portfolio, applicationDate: new Date(), status: 'pending' },
+      update,
       { upsert: true, new: true, setDefaultsOnInsert: true }
     )
-    return res.status(200).json(application)
+
+    if (application && application.domainCertificateData) {
+      application.domainCertificateUrl = `/api/mentor-applications/${application._id}/certificate`
+      await application.save()
+    }
+
+    const safeApplication = application.toObject()
+    delete safeApplication.domainCertificateData
+    return res.status(200).json(safeApplication)
   } catch (error) {
     console.error('Error creating mentor application:', error)
+    return res.status(500).json({ message: 'Server error' })
+  }
+})
+
+app.get('/api/mentor-applications/:id/certificate', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params
+    const userId = req.session.user.id
+    const authUser = await User.findById(userId).select('role')
+    if (!authUser) return res.status(401).json({ message: 'Unauthorized' })
+
+    const application = await MentorApplication.findById(id)
+      .select('userId domainCertificateData domainCertificateContentType domainCertificateName')
+    if (!application || !application.domainCertificateData) {
+      return res.status(404).json({ message: 'Certificate not found' })
+    }
+
+    const isOwner = String(application.userId) === String(userId)
+    const isAdmin = String(authUser.role) === 'admin'
+    if (!isOwner && !isAdmin) {
+      return res.status(403).json({ message: 'Forbidden' })
+    }
+
+    res.setHeader('Content-Type', application.domainCertificateContentType || 'application/octet-stream')
+    if (application.domainCertificateName) {
+      res.setHeader('Content-Disposition', `inline; filename="${application.domainCertificateName.replace(/"/g, '')}"`)
+    }
+    return res.status(200).send(application.domainCertificateData)
+  } catch (error) {
+    console.error('Error fetching mentor application certificate:', error)
     return res.status(500).json({ message: 'Server error' })
   }
 })
