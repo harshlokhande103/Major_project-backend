@@ -17,6 +17,41 @@ const requireAuth = (req, res, next) => {
 const storage = multer.memoryStorage();
 const upload = multer({ storage, limits: { fileSize: 20 * 1024 * 1024 } }); // 20MB limit
 
+const toBase64FromAttachmentData = (data) => {
+  if (!data) return '';
+  try {
+    if (Buffer.isBuffer(data)) return data.toString('base64');
+    if (Array.isArray(data?.data)) return Buffer.from(data.data).toString('base64');
+    if (data instanceof Uint8Array) return Buffer.from(data).toString('base64');
+    if (typeof data === 'object' && typeof data.buffer !== 'undefined') {
+      return Buffer.from(data.buffer).toString('base64');
+    }
+    return Buffer.from(data).toString('base64');
+  } catch {
+    return '';
+  }
+};
+
+const mapMessageForClient = (msg) => {
+  const plain = msg?.toObject ? msg.toObject() : msg;
+  return {
+    ...plain,
+    attachments: Array.isArray(plain?.attachments)
+      ? plain.attachments.map(({ data, mime, ...att }) => ({
+          ...att,
+          mime: mime || '',
+          previewUrl:
+            data && String(mime || '').startsWith('image/')
+              ? (() => {
+                  const base64 = toBase64FromAttachmentData(data);
+                  return base64 ? `data:${mime};base64,${base64}` : '';
+                })()
+              : ''
+        }))
+      : []
+  };
+};
+
 // Create or get a conversation between a user and mentor
 router.post('/conversation', requireAuth, async (req, res) => {
   try {
@@ -37,33 +72,49 @@ router.post('/conversation', requireAuth, async (req, res) => {
   }
 });
 
-// Send a message with a single attachment (image/video/pdf/any file)
-router.post('/messages/attachment', requireAuth, upload.single('file'), async (req, res) => {
+// Send a message with one or more attachments (image/video/pdf/any file)
+router.post('/messages/attachment', requireAuth, upload.fields([
+  { name: 'files', maxCount: 5 },
+  { name: 'file', maxCount: 1 }
+]), async (req, res) => {
   try {
     const { conversationId, text = '' } = req.body;
     if (!conversationId) return res.status(400).json({ message: 'conversationId required' });
-    if (!req.file) return res.status(400).json({ message: 'file is required' });
+
+    const uploadedFiles = [
+      ...(Array.isArray(req.files?.files) ? req.files.files : []),
+      ...(Array.isArray(req.files?.file) ? req.files.file : [])
+    ];
+    if (!uploadedFiles.length) return res.status(400).json({ message: 'At least one file is required' });
 
     const me = new mongoose.Types.ObjectId(String(req.session.user.id));
     const conv = await ChatConversation.findById(conversationId);
     if (!conv) return res.status(404).json({ message: 'Conversation not found' });
     if (!conv.participants.map(String).includes(String(me))) return res.status(403).json({ message: 'Forbidden' });
 
-    // First create message with placeholder; then update URL using created id
-    const provisional = {
-      url: '',
-      name: req.file.originalname || 'file',
-      size: req.file.size || 0,
-      mime: req.file.mimetype || '',
-      data: req.file.buffer
-    };
-    let msg = await ChatMessage.create({ conversationId, senderId: me, text: text || '', attachments: [provisional] });
-    const rel = `/api/chat/attachments/${msg._id}/0`;
-    msg.attachments[0].url = rel;
-    await msg.save();
+    const messageId = new mongoose.Types.ObjectId();
+    const provisionalAttachments = uploadedFiles.map((file, index) => ({
+      url: `/api/chat/attachments/${messageId}/${index}`,
+      name: file.originalname || 'file',
+      size: file.size || 0,
+      mime: file.mimetype || '',
+      data: file.buffer
+    }));
+
+    const msg = await ChatMessage.create({
+      _id: messageId,
+      conversationId,
+      senderId: me,
+      text: text || '',
+      attachments: provisionalAttachments
+    });
 
     conv.lastMessageAt = new Date();
-    conv.lastMessageText = text ? text.slice(0, 500) : (msg.attachments[0].name || 'Attachment');
+    conv.lastMessageText = text
+      ? text.slice(0, 500)
+      : uploadedFiles.length === 1
+        ? (msg.attachments[0].name || 'Attachment')
+        : `${uploadedFiles.length} attachments`;
     await conv.save();
 
     const recipient = conv.participants.find(p => String(p) !== String(me));
@@ -71,13 +122,17 @@ router.post('/messages/attachment', requireAuth, upload.single('file'), async (r
       await Notification.create({
         userId: recipient,
         title: 'New attachment',
-        message: text ? text.slice(0, 80) : (msg.attachments[0].name || 'Attachment'),
+        message: text
+          ? text.slice(0, 80)
+          : uploadedFiles.length === 1
+            ? (msg.attachments[0].name || 'Attachment')
+            : `${uploadedFiles.length} attachments`,
         type: 'chat_message',
         data: { conversationId: conv._id.toString() }
       });
     }
 
-    return res.status(201).json(msg);
+    return res.status(201).json(mapMessageForClient(msg));
   } catch (e) {
     console.error('Send attachment error', e);
     return res.status(500).json({ message: 'Server error' });
@@ -174,7 +229,7 @@ router.get('/conversations/:id/messages', requireAuth, async (req, res) => {
     if (!conv.participants.map(String).includes(String(me))) return res.status(403).json({ message: 'Forbidden' });
 
     const messages = await ChatMessage.find({ conversationId: id }).sort({ createdAt: 1 }).lean();
-    return res.status(200).json(messages);
+    return res.status(200).json(messages.map(mapMessageForClient));
   } catch (e) {
     console.error('List messages error', e);
     return res.status(500).json({ message: 'Server error' });
@@ -209,7 +264,7 @@ router.post('/messages', requireAuth, async (req, res) => {
       });
     }
 
-    return res.status(201).json(msg);
+    return res.status(201).json(mapMessageForClient(msg));
   } catch (e) {
     console.error('Send message error', e);
     return res.status(500).json({ message: 'Server error' });
