@@ -17,6 +17,7 @@ import Booking from './models/Booking.js'
 import pagesRouter from './routes/pages.js'
 import chatRouter from './routes/chat.js'
 import mentorRouter from './routes/mentor.js'
+import seekerDashboardRouter from './routes/seekerDashboard.js'
 
 // Load environment variables
 dotenv.config()
@@ -140,6 +141,7 @@ app.use('/api/mentors', mentorRouter)
 app.use('/api/pages', pagesRouter)
 app.use('/pages', pagesRouter)
 app.use('/api/chat', chatRouter)
+app.use('/api/seeker-dashboard', seekerDashboardRouter)
 
 // User model
 const userSchema = new mongoose.Schema(
