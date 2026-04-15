@@ -765,7 +765,7 @@ app.get('/api/mentor-status', requireAuth, async (req, res) => {
 // Admin - users
 const handleGetUsers = async (req, res) => {
   try {
-    const users = await User.find({}, 'firstName lastName email role field bio createdAt isBlocked').sort({ createdAt: -1 })
+    const users = await User.find({}, 'firstName lastName email role field bio title expertise profileImage createdAt updatedAt lastActiveAt isBlocked').sort({ createdAt: -1 })
     res.status(200).json(users)
   } catch (error) {
     console.error('Error fetching users:', error)
@@ -775,6 +775,42 @@ const handleGetUsers = async (req, res) => {
 
 app.get('/admin/users', requireAuth, requireAdmin, handleGetUsers)
 app.get('/api/admin/users', requireAuth, requireAdmin, handleGetUsers)
+
+const handleGetUserDetails = async (req, res) => {
+  try {
+    const { id } = req.params
+    const user = await User.findById(id)
+      .select('-password -profileImageData')
+      .lean()
+    if (!user) return res.status(404).json({ message: 'User not found' })
+
+    const mentorApplication = await MentorApplication.findOne({ userId: id })
+      .select('-domainCertificateData')
+      .lean()
+
+    const [bookingsAsMentee, bookingsAsMentor, conversationCount] = await Promise.all([
+      Booking.countDocuments({ userId: id }),
+      Booking.countDocuments({ mentorId: id }),
+      mongoose.models.ChatConversation.countDocuments({ participants: id })
+    ])
+
+    return res.status(200).json({
+      user,
+      mentorApplication,
+      stats: {
+        bookingsAsMentee,
+        bookingsAsMentor,
+        conversationCount
+      }
+    })
+  } catch (error) {
+    console.error('Error fetching user details:', error)
+    res.status(500).json({ message: 'Server error' })
+  }
+}
+
+app.get('/admin/users/:id/details', requireAuth, requireAdmin, handleGetUserDetails)
+app.get('/api/admin/users/:id/details', requireAuth, requireAdmin, handleGetUserDetails)
 
 const handleUpdateUserStatus = async (req, res) => {
   try {
